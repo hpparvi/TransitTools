@@ -195,6 +195,27 @@ class DiffEvolFitter(Fitter):
 
         self.generate_minfun('Chi')
 
+#    testsrc = """
+#    subroutine g()
+#      use omp_lib
+#      implicit none
+#    
+#      !$omp parallel
+#      print *,"Testi"
+#      !$omp end parallel
+#    end subroutine g
+#    """
+#    
+#    a = A()
+#    
+#    f = open('tst.f90','w')
+#    f.write(testsrc)
+#    f.close
+#    f2py.compile(testsrc, extra_args='--fcompiler="gfortran" --opt="-O3 -fopenmp" -lgomp -lm', modulename='test', source_fn='tst.f90')
+#    
+#    import test
+#    test.g()
+
     def generate_minfun(self, method='Chi'):
         """
         Generates the minimized function dynamically based on simulation parameters.
@@ -202,7 +223,11 @@ class DiffEvolFitter(Fitter):
         
         fstr = "def minfun(self, p):\n"
         if self.ldbnd is not None:
-            fstr += "   if np.any(p[-%i:]) < 0.: return 1e18\n" % self.ldbnd.shape[1]
+            nldp = self.ldbnd.shape[0]
+            if nldp == 1:
+                fstr += "   if not (0. < p[-1] < 1.): return 1e18\n"
+            else:
+                fstr += "   if np.any(p[-%i:]) < 0.: return 1e18\n" %nldp
             
         if self.fit_center:
             fstr += '   phase_offset = 2.*np.pi*(self.t_center-p[0])/p[1]\n'
@@ -220,7 +245,7 @@ class DiffEvolFitter(Fitter):
         minmethod['Chi'] = '   return ((self.flux_f-self.tlc(self.phase_f %s, p))**2 * self.mean_inv_var).sum() / (self.phase_f.size - self.bnds.shape[0])\n' %(pofs)
 
         fstr += minmethod[method]
-
+        
         exec(fstr)
         self.minfun = MethodType(minfun, self, DiffEvolFitter)
 
