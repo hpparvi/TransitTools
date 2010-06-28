@@ -2,6 +2,8 @@ import sys
 import numpy as np
 import pylab as pl
 
+from types import MethodType
+
 from TransitParameterization import PhysicalTransitParameterization as tpp
 from TransitParameterization import KippingTransitParameterization as tpk
 
@@ -90,7 +92,7 @@ class TTVFitter(Fitter):
         self.setid = 0
 
     def increase_setid(self):
-        self.setid = (self.setid + 1) % self.nsets
+        self.setid = (self.setid + 1) % self.nsets        
 
     def minfun(self, p):
         #X = ((self.fluxsets[self.setid]-self.tlc(self.timesets[self.setid]+self.dt*p[-1], p[:-1]))**2 * self.mean_inv_var).sum() / (self.timesets[self.setid].size - self.bnds.shape[0])
@@ -131,6 +133,11 @@ class DiffEvolFitter(Fitter):
         self.bnds  = np.array([parm.p_low, parm.p_high]).transpose()
         self.phase_lim = phase_lim
 
+        self.n_population = 50
+        self.n_generations = 50
+        self.F = 0.5
+        self.C = 0.5
+
         self.mean_std = 1e-4 if mean_std is None else mean_std
         self.mean_inv_var = 1./self.mean_std**2
         
@@ -140,6 +147,8 @@ class DiffEvolFitter(Fitter):
         ##
         if ldbnd is not None:
             self.bnds = np.concatenate((self.bnds, self.ldbnd))
+
+        self.tlc   = TransitLightCurve(parm, ldpar=np.zeros(self.ldbnd.shape[0]), mode='phase')
 
         ## -- Transit center fitting ---
         ##
@@ -162,29 +171,19 @@ class DiffEvolFitter(Fitter):
             self.phase_f = 2.*np.pi * phase[pm]
             self.flux_f = self._flux[pm]
         else:
-            #raise NotImplementedError
+            raise NotImplementedError
             self.dynamic_binning = True
             self.time_f = self._time
             self.flux_f = self._flux
             self.nbins = binning['nbins']
-
-
-        self.tlc   = TransitLightCurve(parm, ldpar=np.zeros(self.ldbnd.shape[0]), mode='phase')
-
-        self.n_population = 50
-        self.n_generations = 50
-        self.F = 0.5
-        self.C = 0.5
         
         if binning is not None and not self.dynamic_binning:
             #self.b_min = binning['min']
             #self.b_max = binning['max']
             if 'nbins' in binning.keys():
                 self.nbins = binning['nbins']
-                #self.wbins = (self.b_max - self.b_min) / float(self.nbins)
-                self._pb, self._fb, self._ferr = bin(self.phase_f, self.flux_f, 
-                                                     self.nbins) #, 
-                                                     #lim=[self.b_min, self.b_max])
+                self._pb, self._fb, self._ferr = bin(self.phase_f, self.flux_f, self.nbins)
+                self.mean_inv_var = 1./self._ferr**2
             else:
                 self.wbins = binning['wbins']
                 self.nbins = (self.b_max - self.b_min) / float(self.wbins)
@@ -194,45 +193,53 @@ class DiffEvolFitter(Fitter):
             self.phase_f = self._pb[self._fb == self._fb]
             self.flux_f  = self._fb[self._fb == self._fb]
 
-        if self.dynamic_binning:
-            self.minfun = self.minfun_dynamic_binning
-        else:
-            self.minfun = self.minfun_basic
+        self.generate_minfun('Chi')
 
-
-    def minfun_dynamic_binning(self, p):
-        self.phase_f = fold(self._time, p[1], p[0], 0.5) - 0.5
-        self._pb, self._fb, self._ferr = bin(self.phase_f, self._flux, 
-                                                     self.nbins)
-
-        self.phase_f = self._pb[self._fb == self._fb]
-        self.flux_f  = self._fb[self._fb == self._fb]
+    def generate_minfun(self, method='Chi'):
+        """
+        Generates the minimized function dynamically based on simulation parameters.
+        """
         
-        return ((self.flux_f-self.tlc(self.phase_f, p))**2 * self.mean_inv_var).sum() / (self.phase_f.size - self.bnds.shape[0])
+        fstr = "def minfun(self, p):\n"
+        if self.ldbnd is not None:
+            fstr += "   if np.any(p[-%i:]) < 0.: return 1e18\n" % self.ldbnd.shape[1]
+            
+        if self.fit_center:
+            fstr += '   phase_offset = 2.*np.pi*(self.t_center-p[0])/p[1]\n'
+            pofs =  '+ phase_offset'
+        else:
+            pofs += ''
 
-    def minfun_basic(self, p):
-        phase_offset = 2.*np.pi*(self.t_center-p[0])/p[1]
-        return ((self.flux_f-self.tlc(self.phase_f+phase_offset, p))**2 * self.mean_inv_var).sum() / (self.phase_f.size - self.bnds.shape[0])
+        if self.dynamic_binning:
+            fstr += '   self.phase_f = fold(self._time, p[1], p[0], 0.5) - 0.5\n'
+            fstr += '   self.phase_f, self.flux_f, self._ferr = bin(self.phase_f, self._flux, self.nbins)\n'
+            fstr += '   self.mean_inv_var = 1./self._ferr**2\n'
 
-    def minfun_oversampled(self, p): 
-        ph_os = 2.*np.pi*np.linspace(0.45, 0.55, 200)
-        lc_fit = transitlc(ph_os, p)
-        pfb, ffb, ffe = bin(ph_os, lc_fit, bn=pb.size, lim=[2*np.pi*0.45, 2*np.pi*0.55])
-        return ((fb-pfb)**2).sum()
+        minmethod = {}
+        minmethod['Abs'] = '   return (np.abs(self.flux_f-self.tlc(self.phase_f %s, p))).sum()\n' %(pofs)
+        minmethod['Chi'] = '   return ((self.flux_f-self.tlc(self.phase_f %s, p))**2 * self.mean_inv_var).sum() / (self.phase_f.size - self.bnds.shape[0])\n' %(pofs)
+
+        fstr += minmethod[method]
+
+        exec(fstr)
+        self.minfun = MethodType(minfun, self, DiffEvolFitter)
 
     def get_fitted_data(self, binning=False, normalize_phase=True):
+        "Return fitted data."
+        
         phase = fold(self._time, self.p_fit[1], self.p_fit[0], 0.5) - 0.5
         pm = np.logical_and(phase>self.phase_lim[0], phase<self.phase_lim[1])
         phase = 2.*np.pi*phase[pm]
         if normalize_phase:
             phase /= 2.*np.pi
         if binning:
-            pb, fb, fe = bin(phase, self._flux[pm], self.nbins)
-            return pb, fb
+            return bin(phase, self._flux[pm], self.nbins)
         else:
             return phase, self.flux
 
     def get_fitted_lc(self, resolution=500, normalize_phase=True):
+        "Return the best-fit light curve."
+        
         phase = 2.*np.pi*np.linspace(self.phase_lim[0], self.phase_lim[1], resolution)
         flux = self.tlc(phase, self.p_fit)
         
