@@ -1,7 +1,7 @@
 from string import Template
 def construct_Gimenez(npoints, npol, nldcoeff, nthreads=0, build_module=False):
     
-    def construct_main(npoints, nldcoeff, nthreads):
+    def construct(npoints, nldcoeff, nthreads):
         code = Template("""
         subroutine Gimenez(z, r, u, result)
             use omp_lib
@@ -27,9 +27,9 @@ def construct_Gimenez(npoints, npol, nldcoeff, nthreads=0, build_module=False):
         
         return code.substitute(npoints=npoints, nthreads=nthreads, nldc=nldcoeff)
     
-    def construct_Gimenez_s(nldcoeff):
+    def construct_Gimenez_main(nldcoeff):
         code = """
-        pure real(8) function Gimenez_s(z, r, u)
+        pure real(8) function Gimenez_main(z, r, u)
             implicit none
             real(8), intent(in) :: z, r
             real(8), intent(in), dimension(${nldc}) :: u
@@ -57,7 +57,7 @@ def construct_Gimenez(npoints, npol, nldcoeff, nthreads=0, build_module=False):
             
         code += """
             Gimenez_s = 1._fd - sum(a*Cn)
-        end function Gimenez_s
+        end function Gimenez_main
         """
     
         return Template(code).substitute(nldc=nldcoeff)
@@ -144,8 +144,8 @@ def construct_Gimenez(npoints, npol, nldcoeff, nthreads=0, build_module=False):
             contains
         """
     
-    code += construct_main(npoints, nldcoeff, nthreads)
-    code += construct_Gimenez_s(nldcoeff)
+    code += construct(npoints, nldcoeff, nthreads)
+    code += construct_Gimenez_main(nldcoeff)
     code += construct_jacobi(npol)
     code += construct_alpha(npol)
     
