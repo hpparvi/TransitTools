@@ -9,7 +9,7 @@ from TransitParameterization import KippingTransitParameterization as tpk
 
 from TransitLightCurve import TransitLightCurve
 from diffeval import de
-from base import fold#, bin
+from base import fold
 from futils import bin
 
 class Fitter(object):
