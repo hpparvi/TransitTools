@@ -1,0 +1,126 @@
+!!--- BEGIN GPL --- 
+!! Copyright (C) 2010 Hannu Parviainen
+!!
+!! This program is free software: you can redistribute it and/or modify
+!! it under the terms of the GNU General Public License as published by
+!! the Free Software Foundation, either version 3 of the License, or
+!! (at your option) any later version.
+!!
+!! This program is distributed in the hope that it will be useful,
+!! but WITHOUT ANY WARRANTY; without even the implied warranty of
+!! MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+!! GNU General Public License for more details.
+!!
+!! You should have received a copy of the GNU General Public License
+!! along with this program.  If not, see <http://www.gnu.org/licenses/>.
+!!
+!! Contributor(s): Hannu Parviainen <hannu@iac.es>
+!!
+!!--- END GPL ---
+
+!> A template for differential evolution.
+!!
+!! \author  Hannu Parviainen
+!! \email       hannu@iac.es
+!! \version              1.0
+!! \date          29.06.2010
+!!
+!! \history
+!!   21.03.2010
+!!    - Version 1.0: Code cleanup and documentation.
+!!
+!! \todo Change the calls to random_number to use a good random number generator.
+!!
+module diffeval
+  use, intrinsic :: ISO_C_BINDING
+
+  implicit none
+
+  integer, parameter :: FS = C_FLOAT
+  integer, parameter :: FD = C_DOUBLE
+
+contains
+
+  !> Differential evolution method for global optimization.
+  !!
+  !!
+  subroutine de(npt, npar, lb, ub, F, CR, P)
+    use omp_lib
+    implicit none
+
+    integer :: npt, npar
+    real(8), intent(in),  dimension($npar) :: lb
+    real(8), intent(in),  dimension($npar) :: ub
+    real(8), intent(out), dimension($npar+1) :: P
+
+    real(8), intent(in) :: F, CR
+
+    real(8), dimension($npar, $npop) :: population
+    real(8), dimension($npar, $npop) :: tpop
+
+    real(8), dimension($npop)       :: fitness
+    real(8), dimension($npar)       :: bw, crossover, v, u
+    integer, dimension(3)           :: t
+    integer :: i, j
+    real(8) :: s, ufit
+
+    call random_number(population)
+    bw = ub-lb ! bound widths
+    fitness = 0.0
+
+    do i=1,$npop
+       population(:,i) = lb + population(:,i)*bw
+    end do
+
+    do i=1,$npop
+       fitness(i) = c_fitness(x, y, d, population(:,i))
+    end do
+
+    do j=1,$ngener
+       do i=1,$npop
+
+          t = i
+          do while (t(1) == i)
+             call random_number(s)
+             t(1) = 1 + int(s * real($npop))
+          end do
+          do while ((t(2) == i) .or. (t(2) == t(1)))
+             call random_number(s)
+             t(2) = 1 + int(s * real($npop))
+          end do
+          do while ((t(3) == i) .or. (t(3) == t(1)) .or. (t(3) == t(2)))
+             call random_number(s)
+             t(3) = 1 + int(s * real($npop))
+          end do
+
+          v = population(:,t(1)) + F * (population(:,t(2)) - population(:,t(3)))
+
+          !! --- CROSS OVER ---
+          !!
+          call random_number(crossover)
+          u = merge(population(:,i), v, crossover >= CR )
+
+          !! --- FORCED CROSSING ---
+          !!
+          call random_number(s)
+          t(1) = 1 + int(s * real(npar))
+          u(t(1)) = v(t(1))
+
+          !! --- FITNESS ---
+          !!
+          ufit = fitness(x, y, d, u)
+
+          if (ufit < fitness(i)) then
+             tpop(:,i)  = u
+             fitness(i) = ufit
+          else
+             tpop(:,i) = population(:,i)
+          end if
+       end do
+       population = tpop
+    end do
+
+    P(1)  = minval(fitness)
+    P(2:) = population(:,minloc(fitness,1))
+  end subroutine de
+end module diffeval
