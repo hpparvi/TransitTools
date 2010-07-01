@@ -22,7 +22,7 @@ class Fitter(object):
         C  = self.C if C is None else C
         F  = self.F if F is None else F
         
-        self.X, self.p_fit = de(self.minfun, self.bnds, np, ng, F, C)
+        self.X, self.p_fit = de(self.minfun, self.bnds, np, ng, F, C, verbose=self.verbose)
         
         return self.X, self.p_fit.copy()
 
@@ -125,7 +125,7 @@ class TTVFitter(Fitter):
         return phase, flux
 
 class DiffEvolFitter(Fitter):
-    def __init__(self, time, flux, parm, mean_std=None, ldbnd=None, binning=None, phase_lim=[-0.5, 0.5], oversample=False):
+    def __init__(self, time, flux, parm, mean_std=None, ldbnd=None, binning=None, phase_lim=[-0.5, 0.5], oversample=False, verbose=True):
         self._time = time
         self._flux = flux
         self.parm  = parm
@@ -137,6 +137,8 @@ class DiffEvolFitter(Fitter):
         self.n_generations = 50
         self.F = 0.5
         self.C = 0.5
+
+        self.verbose = verbose
 
         self.mean_std = 1e-4 if mean_std is None else mean_std
         self.mean_inv_var = 1./self.mean_std**2
