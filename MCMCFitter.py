@@ -1,177 +1,117 @@
+import sys
+import time
 import numpy as np
 import pylab as pl
 import scipy as sp
-import sys
-import scipy.signal
-import time
 import tables as tbl
+import scipy.signal
 
 from numpy import pi, sin, sqrt, arccos
-
-class MCMCFitter(object):
-    pass
     
-class MCMCThread(threading.Thread):
-    def __init__(self, f, p, pLims, pFree, pSigma, nSteps, type='Cyclic', verbose=True):
-        self.f = f
-        self.p = p[:]
-        self.pLims = pLims[:]
-        self.pFree = pFree[:]
-        self.pSigma = pSigma[:]
-        self.nSteps = nSteps
+class MCMC(object):
+    def __init__(self, chifun, 
+                 p0, p_limits, p_free, p_sigma, p_names, p_descr, 
+                 n_chains, n_steps, 
+                 burn_in=0.2, cor_len=1, dtype='Cyclic', verbose=True, with_mpi=False):
+        
+        if with_mpi:
+            try:
+                from mpi4py import MPI
+                self.cm = MPI.COMM_WORLD
+                self.rank = cm.Get_rank()
+                self.size = cm.Get_size()
+                self.with_mpi = True
+                
+                self.chain_start = self.rank     * n_chains/self.size
+                self.chain_end   = (self.rank+1) * n_chains/self.size
 
-        self.np = p.size
-        self.psim = np.zeros([nSteps, p.size])
-        self.x = np.zeros(nSteps)
-    
-        self._pn = np.arange(p.size)[pFree]
+                if rank != 0:
+                    n_chains = n_chains/self.size
+                
+            except ImportError:
+                self.rank = 0
+                self.size = 1
+                self.with_mpi = False
+        
+        self.chifun = chifun
+        self.n_chains = n_chains
+        self.n_steps = n_steps
+        self.n_parms = self.p.size
+        
+        self.p = np.array(p0).copy()
+        self.p_limits = np.array(p_limits)
+        self.p_free = np.array(p_free)
+        self.p_sigma = np.array(p_sigma)
+        self.p_names = p_names
+        self.p_description = p_descr
+
+        self.result = MCMCResult(n_chains, n_steps, self.np, burn_in, cor_len)
+                
+        self._pn = np.arange(self.np)[pFree]
         self._pi = 0
+        
+        drawTypes = {'Cyclic':self._drawNewCyclic, 'Random':self._drawNewRandom, 'All':self._drawNewAll}
+        acceptionTypes = {'Exp':self._acceptStepExp}
     
-        self.accepted = np.zeros([self.np, 2], np.float)
-    
-        if type=='Cyclic':
-            self.drawNew = self.drawNewCyclic
-        elif type == 'Random':
-            self.drawNew = self.drawNewRandom
-        else:
-            self.drawNew = self.drawNewAll
-
-        self.acceptStep = self.acceptStepExp
-
+        self.drawNew = drawTypes[dtype]
+        self.acceptStep = acceptionTypes['Exp']
         self.verbose = verbose
 
-    def drawNewAll(self, pCur):
+    def _drawNewAll(self, pCur):
         return pCur.copy() + self.pFree*self.pSigma*np.random.normal(self.p.size)
     
-    def drawNewCyclic(self, pCur):
+    def _drawNewCyclic(self, pCur):
         i = self._pn[self._pi]
         pNew = pCur.copy()
         pNew[i] += np.random.normal(0., self.pSigma[i])
         self._pi = (self._pi + 1) % self._pn.size
-
         return pNew, i
         
-    def drawNewRandom(self, pCur):
+    def _drawNewRandom(self, pCur):
         i = self._pn[int(np.floor(np.random.random()*self._pn.size))]
         pNew = pCur.copy()
         pNew[i] += np.random.normal(0., self.pSigma[i])
         self._pi = (self._pi + 1) % self._pn.size
         return pNew, i
     
-    def acceptStepExp(self, X0, Xt):
+    def _acceptStepExp(self, X0, Xt):
         P = np.exp(-0.5*(Xt - X0))
         if np.random.random() < P:
             return True
         else:
             return False
-
-    def acceptStepWiki(self, X0, Xt):
-        a = X0 / Xt
-        if a >= 1.0:
-            return True
-        else:
-            if np.random.random() < a:
-                return True
-            else:
-                return False
-
-    def run(self):
-        self.MCMC()
         
-    def MCMC(self):
+    def __call__(self, chain):
+        "The main Markov Chain Monte Carlo routine in all its simplicity."
+        
         P_cur = self.p.copy()
-        X_cur = self.f(P_cur)
+        X_cur = self.chifun(P_cur)
 
         for i in range(self.nSteps):
-            P_try, i_try = self.drawNew(P_cur)
-            X_try = self.f(P_try)
-            self.accepted[i_try, 0] += 1
+            P_try, pi_try = self.drawNew(P_cur)
+            X_try = self.chifun(P_try)
+            self.result.accepted[chain, pi_try, 0] += 1
 
             if self.acceptStep(X_cur, X_try):
-                self.psim[i,:] = P_try.copy()
-                self.x[i] = X_try
+                self.result.steps[chain, i,:] = P_try.copy()
+                self.result.chi[chain, i] = X_try
                 P_cur[:] = P_try[:]
                 X_cur = X_try
-                self.accepted[i_try, 1] += 1
+                self.result.accepted[chain, pi_try, 1] += 1
             else:
-                self.psim[i,:] = P_cur.copy()
-                self.x[i] = X_cur
-                
-            if self.verbose and i % (self.nSteps / 20) == 0:
-                print "%s %6.0f%%" %(self.getName(), float(i)/self.nSteps * 100.)
-        
-        if self.verbose: print "%s %6.0f%%" %(self.getName(), 100.)
-            
+                self.result.steps[chain, i,:] = P_cur.copy()
+                self.result.chi[chain, i] = X_cur
 
-class MCMC():
-    def __init__(self, fun, p_0, p_limits, p_free, p_sigma, p_names, p_descr, n_steps, n_threads=1, burn_in_p=0.2, p_s=1, ptype='Cyclic', verbose=True):
-        
-        self.fun = fun
-        self.p_0 = np.array(p_0)
-        self.p_limits = np.array(p_limits)
-        self.p_free = np.array(p_free)
-        self.p_sigma = np.array(p_sigma)
-        self.p_names = p_names
-        self.p_description = p_descr
-        self.n_steps = n_steps
-        self.n_threads = n_threads
-        self.burn_in_p = burn_in_p
-        self.p_s = p_s
-        
-        self.np = self.p_0.size
-        self.p_result = np.zeros([n_threads, n_steps, self.p_0.size])
-        self.chi_squared = np.zeros([n_threads, n_steps])
-        
-        p_0 = self.p_limits[:,0] + np.random.random(self.np) * (self.p_limits[:,1] - self.p_limits[:,0])
-        self.simulation_thread = MCMCThread(fun, p_0, self.p_limits, self.p_free, self.p_sigma, n_steps, ptype, verbose)
-
-    def run(self):
-        self.simulation_thread.run()
-        self.p_result[0,:,:] = t.psim[:,:]
-        
-    def runMPI(self):
-        try:
-            from mpi4py import MPI
-            cm = MPI.COMM_WORLD
-            rank = cm.Get_rank()
-            size = cm.Get_size()
-        except:
-            rank = 0
-            size = 1
-        
-        if rank == 0:
-            nChains = self.n_threads / size
-        else:
-            nChains = self.n_threads
-            
-        for t in self.simulation_thread[0:nChains]:
-            t.start()
-            t.join()
-
-
-    def get_results(self, burn_in_p=None, s=None):
-        
-        if burn_in_p is not None:
-            burn_in = int(burn_in_p * self.n_steps)
-        else:
-            burn_in = int(self.burn_in_p * self.n_steps)
-        
-        if s is None:
-            s = self.p_s
-        
-        result = np.empty([0,self.p_0.size])
-        
-        for t in self.simulation_thread:
-            result = np.concatenate((result, t.psim[burn_in::s,:]))
-
-        return result
+    def get_results(self, burn_in=None, cor_len=None):
+        burn_in = burn_in if burn_in is not None else self.result.burn_in
+        burn_in = int(burn_in*self.n_steps)
+        cor_len = cor_len if cor_len is not None else self.result.cor_len
+        return result.steps[burn_in::cor_len, :]
 
     def get_parameter(self, p_idx):
         result = np.zeros([self.n_steps, self.n_threads])
-
         for i, t in enumerate(self.simulation_thread):
             result[:,i] = t.psim[:,p_idx]
-            
         return result
 
     def get_best_fit(self):
@@ -180,9 +120,7 @@ class MCMC():
             if t.x.min() < minX:
                 pb = t.psim[np.argmin(t.x),  :]
                 minX = t.x.min()
-                
         return pb,  minX
-
 
     def get_parameter_median(self):
         return np.median(self.get_results(), 0)
@@ -191,7 +129,6 @@ class MCMC():
         return self.get_results().mean(0)
 
     def print_statistics(self):
-        
         for t in self.simulation_thread:
             print "Accept ratio: ",
             for i in range(self.np):
@@ -222,7 +159,6 @@ class MCMC():
 
     def plot_parameter(self, p=0, n=25, figidx=0):
         r = self.get_results()
-        
         pl.figure(figidx)
         pl.hist(r[:,p], n, fc='0.95')
         for i, t in enumerate(self.simulation_thread):
@@ -230,7 +166,6 @@ class MCMC():
 
     def plot_parameters(self, n=25, figidx=0):
         r = self.get_results()
-        
         pl.figure(figidx)
         for i in range(self.np):
             pl.subplot(self.np, 1, i+1)
@@ -239,7 +174,6 @@ class MCMC():
                 pl.hist(t.psim[int(self.burn_in_p*self.n_steps)::self.p_s, i], n, alpha=0.2, histtype='stepfilled')
 
     def save(self, filename, channel, name, description):
-
         f = tbl.openFile(filename, 'a', "")        
         
         if not f.__contains__('/mcmc'):
@@ -311,32 +245,16 @@ def __test(n_jumps=500, n_threads=2, test_type='Gaussian'):
     return mc
     
 class MCMCResult():
-    def __init__(self, filename, channel, name, burn_in_p = 0.2, s=1):
+    def __init__(self, n_chains, n_steps, n_parms, burn_in = 0.2, cor_len=1):
+        self.n_chains = n_chains
+        self.n_steps  = n_steps
+        self.n_parms  = n_parms
+        self.burn_in  = burn_in
+        self.cor_len  = cor_len
         
-        self.data = {}
-        
-        f    = tbl.openFile(filename, 'r')
-        g_mc = f.root.mcmc
-                
-        d = f.getNode(g_mc, '%s/%s' %(channel, name))
-        
-        self.keys = d._v_attrs.p_names
-        self.pnames = d._v_attrs.p_description
-        self.np = d._v_attrs.n_variables
-        
-        self.n_steps = d._v_attrs.n_steps
-        self.n_chains = d._v_attrs.n_chains
-        
-        for i in range(self.np):
-            self.data[self.keys[i]] = f.getNode(d, 'p%i' %i).read()
-        
-        self.Chi_squared = f.getNode(d, 'Chi_squared').read()
-
-        f.close()
-        
-        self.burn_in = burn_in_p * self.n_steps
-        self.s = s
-
+        self.steps    = np.zeros([n_chains, n_steps, n_parms])
+        self.chi      = np.zeros(n_chains, n_steps)
+        self.accepted = np.zeros([n_chains, n_parms, 2])
 
     def plot_2d_param_distributions(self, figidx=0, axes=None, nb=25, params=[0,1], lims=None, interpolation='bicubic', label=None):
 
@@ -473,16 +391,17 @@ class MCMCResult():
             r[i] = method(self(i))
         return r
             
-    def __call__(self, i, separate_chains=False, s=None):
-        if s is None:
-            s = self.s
+    def __call__(self, burn_in=None, cor_len=None, separate_chains=False):
+        burn_in = burn_in if burn_in is not None else self.burn_in
+        burn_in = int(burn_in*self.n_steps)
+        cor_len = cor_len if cor_len is not None else self.cor_len
         
         if not separate_chains:
             r = np.array([])
             for j in range(self.n_chains):
-                r = np.concatenate((r,self.data[self.keys[i]][self.burn_in::s,j]))
+                r = np.concatenate((r, self.steps[burn_in::cor_len, j]))
         else:
-            r = self.data[self.keys[i]][self.burn_in::s,:]
+            r = self.steps[burn_in::cor_len, :]
         return r
     
 if __name__ == "__main__":
