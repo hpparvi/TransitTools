@@ -7,36 +7,48 @@ import tables as tbl
 import scipy.signal
 
 from numpy import pi, sin, sqrt, arccos
-    
+from base import *
+
+try:
+    from mpi4py import MPI
+    with_mpi = True
+except ImportError:
+    with_mpi = False
+
 class MCMC(object):
     def __init__(self, chifun, 
                  p0, p_limits, p_free, p_sigma, p_names, p_descr, 
                  n_chains, n_steps, 
-                 burn_in=0.2, cor_len=1, dtype='Cyclic', verbose=True, with_mpi=False):
-        
-        if with_mpi:
-            try:
-                from mpi4py import MPI
-                self.cm = MPI.COMM_WORLD
-                self.rank = cm.Get_rank()
-                self.size = cm.Get_size()
-                self.with_mpi = True
-                
-                self.chain_start = self.rank     * n_chains/self.size
-                self.chain_end   = (self.rank+1) * n_chains/self.size
+                 burn_in=0.2, cor_len=1, dtype='Cyclic', verbose=True, use_mpi=False):
 
-                if rank != 0:
-                    n_chains = n_chains/self.size
+        if with_mpi and use_mpi:
+            self.cm = MPI.COMM_WORLD
+            self.rank = self.cm.Get_rank()
+            self.size = self.cm.Get_size()
+            self.use_mpi = True
+            
+            n_chains_loc     = n_chains//self.size
+            self.chain_start = self.rank * n_chains_loc
+    
+            if self.rank == self.size-1:
+                self.chain_end = n_chains
+                n_chains_loc = self.chain_end - self.chain_start
+            else:
+                self.chain_end = self.chain_start + n_chains_loc
                 
-            except ImportError:
-                self.rank = 0
-                self.size = 1
-                self.with_mpi = False
+            if self.rank != 0:
+                n_chains = n_chains_loc
+            
+            logging.info('Created node %i with %i chains (%i--%i)'%(self.rank, n_chains, self.chain_start+1, self.chain_end))
+        else:        
+            self.use_mpi = False
+            self.rank = 0
+            self.size = 1
         
         self.chifun = chifun
         self.n_chains = n_chains
         self.n_steps = n_steps
-        self.n_parms = self.p.size
+        self.n_parms = len(p0)
         
         self.p = np.array(p0).copy()
         self.p_limits = np.array(p_limits)
@@ -45,9 +57,9 @@ class MCMC(object):
         self.p_names = p_names
         self.p_description = p_descr
 
-        self.result = MCMCResult(n_chains, n_steps, self.np, burn_in, cor_len)
+        self.result = MCMCResult(n_chains, n_steps, self.n_parms, burn_in, cor_len)
                 
-        self._pn = np.arange(self.np)[pFree]
+        self._pn = np.arange(self.n_parms)[self.p_free]
         self._pi = 0
         
         drawTypes = {'Cyclic':self._drawNewCyclic, 'Random':self._drawNewRandom, 'All':self._drawNewAll}
@@ -63,7 +75,7 @@ class MCMC(object):
     def _drawNewCyclic(self, pCur):
         i = self._pn[self._pi]
         pNew = pCur.copy()
-        pNew[i] += np.random.normal(0., self.pSigma[i])
+        pNew[i] += np.random.normal(0., self.p_sigma[i])
         self._pi = (self._pi + 1) % self._pn.size
         return pNew, i
         
@@ -81,32 +93,51 @@ class MCMC(object):
         else:
             return False
         
-    def __call__(self, chain):
+    def __call__(self):
         "The main Markov Chain Monte Carlo routine in all its simplicity."
-        
-        P_cur = self.p.copy()
-        X_cur = self.chifun(P_cur)
 
-        for i in range(self.nSteps):
-            P_try, pi_try = self.drawNew(P_cur)
-            X_try = self.chifun(P_try)
-            self.result.accepted[chain, pi_try, 0] += 1
-
-            if self.acceptStep(X_cur, X_try):
-                self.result.steps[chain, i,:] = P_try.copy()
-                self.result.chi[chain, i] = X_try
-                P_cur[:] = P_try[:]
-                X_cur = X_try
-                self.result.accepted[chain, pi_try, 1] += 1
+        for chain in range(self.n_chains):
+            logging.info('Starting node %2i  chain %2i  of %2i' %(self.rank, chain+1, self.n_chains))
+            P_cur = self.p.copy()
+            X_cur = self.chifun(P_cur)
+    
+            for i in range(self.n_steps):
+                P_try, pi_try = self.drawNew(P_cur)
+                X_try = self.chifun(P_try)
+                self.result.accepted[chain, pi_try, 0] += 1
+    
+                if self.acceptStep(X_cur, X_try):
+                    self.result.steps[chain, i,:] = P_try.copy()
+                    self.result.chi[chain, i] = X_try
+                    P_cur[:] = P_try[:]
+                    X_cur = X_try
+                    self.result.accepted[chain, pi_try, 1] += 1
+                else:
+                    self.result.steps[chain, i,:] = P_cur.copy()
+                    self.result.chi[chain, i] = X_cur
+                
+        if self.use_mpi:
+            if self.rank == 0:
+                for node in range(1, self.size):
+                    cs, ce = self.cm.recv(source=node, tag=11)
+                    for chain in range(cs, ce):
+                        logging.info('Master receiving node %i chain %i' %(node, chain+1))
+                        self.cm.Recv([self.result.steps[chain, :, :], MPI.DOUBLE], source=node, tag=77)
+                        self.cm.Recv([self.result.chi[chain, :], MPI.DOUBLE], source=node, tag=77)
+                        self.cm.Recv([self.result.accepted[chain, :], MPI.DOUBLE], source=node, tag=77)
             else:
-                self.result.steps[chain, i,:] = P_cur.copy()
-                self.result.chi[chain, i] = X_cur
+                self.cm.send((self.chain_start, self.chain_end), dest=0, tag=11)
+                for chain in range(self.n_chains):
+                    logging.info('Node %i sendind chain local:%3i  global:%3i' %(self.rank, chain+1, self.chain_start+chain+1))
+                    self.cm.Send([self.result.steps[chain,:,:], MPI.DOUBLE], dest=0, tag=77)
+                    self.cm.Send([self.result.chi[chain, :], MPI.DOUBLE], dest=0, tag=77)
+                    self.cm.Send([self.result.accepted[chain, :], MPI.DOUBLE], dest=0, tag=77)
 
     def get_results(self, burn_in=None, cor_len=None):
         burn_in = burn_in if burn_in is not None else self.result.burn_in
         burn_in = int(burn_in*self.n_steps)
         cor_len = cor_len if cor_len is not None else self.result.cor_len
-        return result.steps[burn_in::cor_len, :]
+        return self.result.steps[:, burn_in::cor_len, :]
 
     def get_parameter(self, p_idx):
         result = np.zeros([self.n_steps, self.n_threads])
@@ -244,7 +275,7 @@ def __test(n_jumps=500, n_threads=2, test_type='Gaussian'):
 
     return mc
     
-class MCMCResult():
+class MCMCResult(FitResult):
     def __init__(self, n_chains, n_steps, n_parms, burn_in = 0.2, cor_len=1):
         self.n_chains = n_chains
         self.n_steps  = n_steps
@@ -253,7 +284,7 @@ class MCMCResult():
         self.cor_len  = cor_len
         
         self.steps    = np.zeros([n_chains, n_steps, n_parms])
-        self.chi      = np.zeros(n_chains, n_steps)
+        self.chi      = np.zeros([n_chains, n_steps])
         self.accepted = np.zeros([n_chains, n_parms, 2])
 
     def plot_2d_param_distributions(self, figidx=0, axes=None, nb=25, params=[0,1], lims=None, interpolation='bicubic', label=None):
@@ -405,25 +436,32 @@ class MCMCResult():
         return r
     
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        n_jumps = 500
-    else: 
-        n_jumps = int(sys.argv[1])
+    def cf(p):
+        return np.sum(p**2)
 
-    if len(sys.argv) < 3:
-        n_threads = 2
-    else: 
-        n_threads = int(sys.argv[2])
+    p0 = [1., 2., 1.]
+    pL = [[-1., 1.], [-1, 1], [-1, 1]]
+    pf = [True, True, True]
+    ps = [0.2, 0.2, 0.2]
+    pn = ['x', 'y', 'z']
 
-    print "Running MCMC test with %i jumps and %i threads." %(n_jumps, n_threads)
+    mc = MCMC(cf, p0, pL, pf, ps, pn, pn, 4, 1000, use_mpi=True)
+    mc()
+    if mc.rank == 0:
+        r = mc.get_results(0, 10)
+        for c in range(mc.n_chains):
+            pl.plot(r[c, :, 0])
+        pl.show()
 
-    mc = __test(n_jumps, n_threads)
+#    print "Running MCMC test with %i jumps and %i threads." %(n_jumps, n_threads)
+#
+#    mc = __test(n_jumps, n_threads)
 
-    mc.print_statistics()
-    mc.plot_correlation()
-    mc.plot_parameter(0, figidx=100)
-    mc.plot_parameter(1, figidx=101)
-    mc.plot_parameter(2, figidx=102)
-    pl.show()
+#    mc.print_statistics()
+#    mc.plot_correlation()
+#    mc.plot_parameter(0, figidx=100)
+#    mc.plot_parameter(1, figidx=101)
+#    mc.plot_parameter(2, figidx=102)
+#    pl.show()
 
 
