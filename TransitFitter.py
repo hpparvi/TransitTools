@@ -3,6 +3,7 @@ import numpy as np
 import pylab as pl
 
 from types import MethodType
+from numpy import asarray
 
 from TransitParameterization import PhysicalTransitParameterization as tpp
 from TransitParameterization import KippingTransitParameterization as tpk
@@ -12,19 +13,50 @@ from diffeval import de
 from base import fold
 from futils import bin
 
+from DifferentialEvolution import DiffEvol
+from MCMC import MCMC
+
 class Fitter(object):
     def __init__(self): 
         pass
         
-    def __call__(self, npop=None, ngen=None, F=None, C=None):
-        np = self.n_population  if npop is None else npop
-        ng = self.n_generations if ngen is None else ngen
-        C  = self.C if C is None else C
-        F  = self.F if F is None else F
+    def __call__(self):
+        r = self.fitter()
+        self.p_fit=r[1]
+        return r[0], r[1].copy()
+
+    def generate_minfun(self, method='Chi'):
+        """
+        Generates the minimized function dynamically based on simulation parameters.
+        """
         
-        self.X, self.p_fit = de(self.minfun, self.bnds, np, ng, F, C, verbose=self.verbose)
+        fstr = "def minfun(self, p):\n"
+        if self.ldbnd is not None:
+            nldp = self.ldbnd.shape[0]
+            if nldp == 1:
+                fstr += "   if not (0. < p[-1] < 1.): return 1e18\n"
+            else:
+                fstr += "   if np.any(p[-%i:]) < 0.: return 1e18\n" %nldp
+            
+        if self.fit_center:
+            fstr += '   phase_offset = 2.*np.pi*(self.t_center-p[0])/p[1]\n'
+            pofs =  '+ phase_offset'
+        else:
+            pofs += ''
+    
+        if self.dynamic_binning:
+            fstr += '   self.phase_f = fold(self._time, p[1], p[0], 0.5) - 0.5\n'
+            fstr += '   self.phase_f, self.flux_f, self._ferr = bin(self.phase_f, self._flux, self.nbins)\n'
+            fstr += '   self.mean_inv_var = 1./self._ferr**2\n'
+    
+        minmethod = {}
+        minmethod['Abs'] = '   return (np.abs(self.flux_f-self.tlc(self.phase_f %s, p))).sum()\n' %(pofs)
+        minmethod['Chi'] = '   return ((self.flux_f-self.tlc(self.phase_f %s, p))**2 * self.mean_inv_var).sum() / (self.phase_f.size - self.bnds.shape[0])\n' %(pofs)
+    
+        fstr += minmethod[method]
         
-        return self.X, self.p_fit.copy()
+        exec(fstr)
+        self.minfun = MethodType(minfun, self, DiffEvolFitter)
 
 class TTVFitter(Fitter):
     def __init__(self, time, flux, parm, mean_std=None, ldbnd=None, phase_lim=[-0.5, 0.5]):
@@ -125,19 +157,16 @@ class TTVFitter(Fitter):
         return phase, flux
 
 class DiffEvolFitter(Fitter):
-    def __init__(self, time, flux, parm, mean_std=None, ldbnd=None, binning=None, phase_lim=[-0.5, 0.5], oversample=False, verbose=True):
+    def __init__(self, time, flux, parm, mean_std=None, ldbnd=None, binning=None, 
+                 seed=0, npop=50, ngen=50, F=0.5, C=0.5, phase_lim=[-0.5, 0.5], 
+                 oversample=False, verbose=True):
+                     
         self._time = time
         self._flux = flux
         self.parm  = parm
-        self.ldbnd = np.array(ldbnd)
-        self.bnds  = np.array([parm.p_low, parm.p_high]).transpose()
-        self.phase_lim = phase_lim
-
-        self.n_population = 50
-        self.n_generations = 50
-        self.F = 0.5
-        self.C = 0.5
-
+        self.ldbnd = asarray(ldbnd)
+        self.bnds  = asarray([parm.p_low, parm.p_high]).transpose()
+        self.phase_lim = asarray(phase_lim)
         self.verbose = verbose
 
         self.mean_std = 1e-4 if mean_std is None else mean_std
@@ -196,6 +225,7 @@ class DiffEvolFitter(Fitter):
             self.flux_f  = self._fb[self._fb == self._fb]
 
         self.generate_minfun('Chi')
+        self.fitter = DiffEvol(self.minfun, self.bnds, npop, ngen, F, C, seed=seed, verbose=True)
 
 #    testsrc = """
 #    subroutine g()
@@ -217,39 +247,6 @@ class DiffEvolFitter(Fitter):
 #    
 #    import test
 #    test.g()
-
-    def generate_minfun(self, method='Chi'):
-        """
-        Generates the minimized function dynamically based on simulation parameters.
-        """
-        
-        fstr = "def minfun(self, p):\n"
-        if self.ldbnd is not None:
-            nldp = self.ldbnd.shape[0]
-            if nldp == 1:
-                fstr += "   if not (0. < p[-1] < 1.): return 1e18\n"
-            else:
-                fstr += "   if np.any(p[-%i:]) < 0.: return 1e18\n" %nldp
-            
-        if self.fit_center:
-            fstr += '   phase_offset = 2.*np.pi*(self.t_center-p[0])/p[1]\n'
-            pofs =  '+ phase_offset'
-        else:
-            pofs += ''
-
-        if self.dynamic_binning:
-            fstr += '   self.phase_f = fold(self._time, p[1], p[0], 0.5) - 0.5\n'
-            fstr += '   self.phase_f, self.flux_f, self._ferr = bin(self.phase_f, self._flux, self.nbins)\n'
-            fstr += '   self.mean_inv_var = 1./self._ferr**2\n'
-
-        minmethod = {}
-        minmethod['Abs'] = '   return (np.abs(self.flux_f-self.tlc(self.phase_f %s, p))).sum()\n' %(pofs)
-        minmethod['Chi'] = '   return ((self.flux_f-self.tlc(self.phase_f %s, p))**2 * self.mean_inv_var).sum() / (self.phase_f.size - self.bnds.shape[0])\n' %(pofs)
-
-        fstr += minmethod[method]
-        
-        exec(fstr)
-        self.minfun = MethodType(minfun, self, DiffEvolFitter)
 
     def get_fitted_data(self, binning=False, normalize_phase=True):
         "Return fitted data."
@@ -274,6 +271,79 @@ class DiffEvolFitter(Fitter):
             phase /= 2.*np.pi
         return phase, flux
 
+class MCMCFitter(Fitter):
+    def __init__(self, time, flux, parm, n_chains=5, n_steps=100, mean_std=None, 
+                 ldbnd=None, binning=None, 
+                 seed=0, phase_lim=[-0.5, 0.5], 
+                 oversample=False, verbose=True):
+                     
+        self._time = time
+        self._flux = flux
+        self.parm  = parm
+        self.ldbnd = asarray(ldbnd)
+        self.bnds  = asarray([parm.p_low, parm.p_high]).transpose()
+        self.phase_lim = asarray(phase_lim)
+        self.verbose = verbose
+
+        self.mean_std = 1e-4 if mean_std is None else mean_std
+        self.mean_inv_var = 1./self.mean_std**2
+        
+        ## --- Limb darkening parameters ---
+        ## If limb darkening parameter bounds are definend, they 
+        ## are concatenated to the parameter boundary vector.
+        ##
+        if ldbnd is not None:
+            self.bnds = np.concatenate((self.bnds, self.ldbnd))
+
+        self.tlc   = TransitLightCurve(parm, ldpar=np.zeros(self.ldbnd.shape[0]), mode='phase')
+
+        ## -- Transit center fitting ---
+        ##
+        if np.abs(parm.p_high[0]-parm.p_low[0]) < 1e-12:
+            self.t_center = parm.p_low[0]
+            self.fit_center = False
+        else:
+            self.t_center = 0.5 * (parm.p_low[0] + parm.p_high[0])
+            self.fit_center = True
+            
+        ## --- Dynamic folding and binning --- 
+        ## If we are fitting the period, the data must be refolded
+        ## and rebinned for each fitting generation.
+        ##
+        if np.abs(parm.p_high[1]-parm.p_low[1]) < 1e-12:
+            self.dynamic_binning = False
+            phase = fold(self._time, parm.p_low[1], self.t_center, 0.5) - 0.5
+            pm = np.logical_and(phase>self.phase_lim[0], phase<self.phase_lim[1])
+            self.time_f = self._time[pm]
+            self.phase_f = 2.*np.pi * phase[pm]
+            self.flux_f = self._flux[pm]
+        else:
+            raise NotImplementedError
+            self.dynamic_binning = True
+            self.time_f = self._time
+            self.flux_f = self._flux
+            self.nbins = binning['nbins']
+        
+        if binning is not None and not self.dynamic_binning:
+            #self.b_min = binning['min']
+            #self.b_max = binning['max']
+            if 'nbins' in binning.keys():
+                self.nbins = binning['nbins']
+                self._pb, self._fb, self._ferr = bin(self.phase_f, self.flux_f, self.nbins)
+                self.mean_inv_var = 1./self._ferr**2
+            else:
+                self.wbins = binning['wbins']
+                self.nbins = (self.b_max - self.b_min) / float(self.wbins)
+                self._pb, self._fb, self._ferr = bin(self.phase, self.flux, 
+                                                     bw=self.nbins, 
+                                                     lim=[self.b_min, self.b_max])
+            self.phase_f = self._pb[self._fb == self._fb]
+            self.flux_f  = self._fb[self._fb == self._fb]
+
+        self.generate_minfun('Chi')
+        self.fitter = MCMC(self.minfun, p0=p0, p_limits=p_bnds, p_free=p_free, p_sigma=p_sigma, 
+                           p_names=self.parm.p_names, p_descr=self.parm.p_descr, n_chains=n_chains, 
+                           n_steps=n_steps,  seed=seed, verbose=True)
 
 def main():
     

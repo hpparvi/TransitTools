@@ -1,10 +1,20 @@
 #!/usr/bin/env python2.5
 import numpy as np
+import logging
 
 TWO_PI = 2.*np.pi
 HALF_PI = 0.5*np.pi
 
+logging.basicConfig(filename=None, level=logging.DEBUG,
+                    format='%(asctime)s %(levelname)-6s %(message)s',
+                    datefmt='%m-%d %H:%M')
+
 class InvalidTransitShapeError(NotImplementedError): pass
+
+class FitResult(object):
+    def __init__(self): pass
+    def get_fit(self): raise NotImplementedError
+    def get_chi(self): raise NotImplementedError
 
 class transitLightCurve(object):
 
