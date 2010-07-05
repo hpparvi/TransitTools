@@ -436,16 +436,13 @@ class MCMCResult(FitResult):
         return r
     
 if __name__ == "__main__":
-    def cf(p):
-        return np.sum(p**2)
-
     p0 = [1., 2., 1.]
     pL = [[-1., 1.], [-1, 1], [-1, 1]]
     pf = [True, True, True]
     ps = [0.2, 0.2, 0.2]
     pn = ['x', 'y', 'z']
 
-    mc = MCMC(cf, p0, pL, pf, ps, pn, pn, 4, 1000, use_mpi=True)
+    mc = MCMC(lambda P: np.sum(P**2), p0, pL, pf, ps, pn, pn, 4, 1000, use_mpi=True)
     mc()
     if mc.rank == 0:
         r = mc.get_results(0, 10)

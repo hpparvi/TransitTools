@@ -4,6 +4,12 @@ from numpy import asarray
 
 from base import *
 
+try:
+    from mpi4py import MPI
+    with_mpi = True
+except ImportError:
+    with_mpi = False
+
 class DiffEvol(object):
     """
     Implements the differential evolution optimization method by Storn & Price
@@ -32,7 +38,7 @@ class DiffEvol(object):
     Population = [pv, parameter]
     """ 
     
-    def __init__(self, fun, bounds, npop, ngen, F=0.5, C=0.5, id=0, size=1, seed=0, verbose=True):
+    def __init__(self, fun, bounds, npop, ngen, F=0.5, C=0.5, id=0, size=1, seed=0, use_mpi=True, verbose=True):
         self.minfun = fun
         self.bounds = asarray(bounds)
         self.n_gen  = ngen
@@ -45,7 +51,19 @@ class DiffEvol(object):
         self.F = F
         self.C = C
         
-        np.random.seed(seed)
+        if with_mpi and use_mpi:
+            self.cm = MPI.COMM_WORLD
+            self.rank = self.cm.Get_rank()
+            self.size = self.cm.Get_size()
+            self.use_mpi = True
+            self.seed += self.rank
+            logging.info('Created node %i'%self.rank)
+        else:        
+            self.use_mpi = False
+            self.rank = 0
+            self.size = 1    
+
+        np.random.seed(self.seed)
         self.result = DiffEvolResult(npop, self.n_parm, self.bl, self.bw)
 
     def __call__(self):
@@ -75,7 +93,28 @@ class DiffEvol(object):
                 if ufit < r.fitness[i]:
                     r.pop[i,:] = u[:]
                     r.fit[i]   = ufit
-        
+                    
+            logging.info('Node %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min()))
+            
+        if self.use_mpi:
+            if self.rank == 0:
+                tpop = np.zeros([self.size*self.n_pop,  self.n_parm])
+                tfit = np.zeros(self.size*self.n_pop)
+                tpop[:self.n_pop, :] = r.pop[:, :]
+                tfit[:self.n_pop] = r.fit[:]
+                for node in range(1, self.size):
+                    s=node*self.n_pop; e=(node+1)*self.n_pop
+                    logging.info('Master receiving node %i' %node)
+                    self.cm.Recv([tpop[s:e, :], MPI.DOUBLE], source=node, tag=77)
+                    self.cm.Recv([tfit[s:e], MPI.DOUBLE], source=node, tag=77)
+                    logging.info('Master received node %i' %node)
+                r.population = tpop; r.pop = tpop
+                r.fitness = tfit; r.fit = tfit
+            else:
+                logging.info('Node %i sending results to master' %self.rank)
+                self.cm.Send([r.pop[:, :], MPI.DOUBLE], dest=0, tag=77)
+                self.cm.Send([r.fit[:], MPI.DOUBLE], dest=0, tag=77)
+                
         self.result.minidx = np.argmin(r.fitness)
         return r.get_chi(), r.get_fit()
 
@@ -93,4 +132,9 @@ class DiffEvolResult(FitResult):
         return self.population[self.minidx,:]
 
 if __name__ == '__main__':
-    print DiffEvol(lambda P: np.sum((P-1)**2), [[-2, 2], [-2, 2], [-2, 2]], 40, 50, seed=0)()
+    de = DiffEvol(lambda P: np.sum((P-1)**2), [[-2, 2], [-2, 2], [-2, 2]], 20, 100, seed=0)
+    de()
+        
+    if de.rank == 0:
+        print de.result.get_chi()
+        print de.result.get_fit()
