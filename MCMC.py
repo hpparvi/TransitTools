@@ -18,7 +18,7 @@ except ImportError:
 class MCMC(object):
     def __init__(self, chifun, 
                  p0, p_limits, p_free, p_sigma, p_names, p_descr, 
-                 n_chains, n_steps, 
+                 n_chains, n_steps, seed=0, 
                  burn_in=0.2, cor_len=1, dtype='Cyclic', verbose=True, use_mpi=False):
 
         if with_mpi and use_mpi:
@@ -49,14 +49,16 @@ class MCMC(object):
         self.n_chains = n_chains
         self.n_steps = n_steps
         self.n_parms = len(p0)
-        
-        self.p = np.array(p0).copy()
-        self.p_limits = np.array(p_limits)
-        self.p_free = np.array(p_free)
-        self.p_sigma = np.array(p_sigma)
+        self.seed = seed
+                
+        self.p = np.asarray(p0).copy()
+        self.p_limits = np.asarray(p_limits)
+        self.p_free = np.asarray(p_free)
+        self.p_sigma = np.asarray(p_sigma)
         self.p_names = p_names
         self.p_description = p_descr
 
+        np.random.seed(seed)
         self.result = MCMCResult(n_chains, n_steps, self.n_parms, burn_in, cor_len)
                 
         self._pn = np.arange(self.n_parms)[self.p_free]
@@ -96,12 +98,14 @@ class MCMC(object):
     def __call__(self):
         "The main Markov Chain Monte Carlo routine in all its simplicity."
 
-        for chain in range(self.n_chains):
+        ## --- MCMC ---
+        ##
+        for chain in xrange(self.n_chains):
             logging.info('Starting node %2i  chain %2i  of %2i' %(self.rank, chain+1, self.n_chains))
             P_cur = self.p.copy()
             X_cur = self.chifun(P_cur)
     
-            for i in range(self.n_steps):
+            for i in xrange(self.n_steps):
                 P_try, pi_try = self.drawNew(P_cur)
                 X_try = self.chifun(P_try)
                 self.result.accepted[chain, pi_try, 0] += 1
@@ -115,7 +119,9 @@ class MCMC(object):
                 else:
                     self.result.steps[chain, i,:] = P_cur.copy()
                     self.result.chi[chain, i] = X_cur
-                
+                    
+        ## --- MPI communication ---
+        ##
         if self.use_mpi:
             if self.rank == 0:
                 for node in range(1, self.size):
@@ -132,6 +138,8 @@ class MCMC(object):
                     self.cm.Send([self.result.steps[chain,:,:], MPI.DOUBLE], dest=0, tag=77)
                     self.cm.Send([self.result.chi[chain, :], MPI.DOUBLE], dest=0, tag=77)
                     self.cm.Send([self.result.accepted[chain, :], MPI.DOUBLE], dest=0, tag=77)
+        
+        return self.result
 
     def get_results(self, burn_in=None, cor_len=None):
         burn_in = burn_in if burn_in is not None else self.result.burn_in

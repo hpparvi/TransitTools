@@ -8,7 +8,7 @@ class TransitParameterization(object):
     Base class for the different transit parameterization classes. Can't be used in fitting.
     """
     
-    def __init__(self, p_init=None, p_low=None, p_high=None,  eccentric=False):
+    def __init__(self, p_init=None, p_low=None, p_high=None, p_sigma=None, eccentric=False):
         self.p_names = ['tc', 'P']
         self.p_descr = ['transit center', 'period']
         self.p_units = ['HJD', 'd']
@@ -30,11 +30,15 @@ class TransitParameterization(object):
             p_b = np.array([p_l, p_h])
         
             self.p = self.mapped_from_orbit_c(p_init.mapped_to_orbit(p_init.p))
+            #self.p_sigma = self.mapped_from_orbit_c(p_init.mapped_to_orbit(p_init.p_sigma))
+            self.p_sigma = p_init.p_sigma
             self.p_low = p_b.min(0)
             self.p_high = p_b.max(0)
         else:
             self.p_low = p_low if p_low is not None else p_init
             self.p_high = p_high if p_high is not None else p_init
+            
+            self.p_sigma = p_sigma
             
             if p_init is None:
                 self.p = 0.5 * (p_low + p_high)
@@ -62,8 +66,8 @@ class OrbitTransitParameterization(TransitParameterization):
       the inclination i
     """
     
-    def __init__(self, p_low, p_high,  p_init=None):
-        super(OrbitTransitParameterization,  self).__init__(p_low, p_high,  p_init)
+    def __init__(self, p_init=None, p_low=None, p_high=None, p_sigma=None):
+        super(OrbitTransitParameterization,  self).__init__(p_init, p_low, p_high, p_sigma)
         self.p_names.extend(['p', 'a', 'i'])
         self.p_descr.extend(['radius ratio', 'semi-major axis [R_star]', 
                              'inclination'])
@@ -96,8 +100,8 @@ class PhysicalTransitParameterization(TransitParameterization):
     fitting will be highly uneficcient.
     """
     
-    def __init__(self, p_init=None, p_low=None, p_high=None, eccentric=False):
-        super(PhysicalTransitParameterization,  self).__init__(p_init, p_low, p_high,  eccentric)
+    def __init__(self, p_init=None, p_low=None, p_high=None, p_sigma=None, eccentric=False):
+        super(PhysicalTransitParameterization,  self).__init__(p_init, p_low, p_high, p_sigma, eccentric)
         self.p_names.extend(['p', 'a', 'b'])
         self.p_descr.extend(['radius ratio', 'semi-major axis', 
                              'impact parameter'])
@@ -160,8 +164,8 @@ class KippingTransitParameterization(TransitParameterization):
         b2  squared impact parameter
     """
     
-    def __init__(self, p_init=None, p_low=None, p_high=None, eccentric=False):
-        super(KippingTransitParameterization,  self).__init__(p_init, p_low, p_high, eccentric)  
+    def __init__(self, p_init=None, p_low=None, p_high=None, p_sigma=None, eccentric=False):
+        super(KippingTransitParameterization,  self).__init__(p_init, p_low, p_high, p_sigma, eccentric)  
         self.p_names.extend(['p2', 'it', 'b2'])
         self.p_descr.extend(['transit depth', 'transit duration parameter', 
                              'squared impact parameter'])

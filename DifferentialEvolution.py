@@ -70,10 +70,12 @@ class DiffEvol(object):
         """The differential evolution algorithm."""
         r = self.result
         t = np.zeros(3, np.int)
-        for i in range(self.n_pop):
+        
+        for i in xrange(self.n_pop):
             r.fit[i] = self.minfun(r.pop[i,:])
-        for j in range(self.n_gen):
-            for i in range(self.n_pop):
+            
+        for j in xrange(self.n_gen):
+            for i in xrange(self.n_pop):
                 t[:] = i
                 while  t[0] == i:
                     t[0] = randint(self.n_pop)
@@ -93,9 +95,11 @@ class DiffEvol(object):
                 if ufit < r.fitness[i]:
                     r.pop[i,:] = u[:]
                     r.fit[i]   = ufit
-                    
+                            
             logging.info('Node %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min()))
-            
+        
+        ## --- MPI communication ---
+        ##
         if self.use_mpi:
             if self.rank == 0:
                 tpop = np.zeros([self.size*self.n_pop,  self.n_parm])
@@ -116,7 +120,8 @@ class DiffEvol(object):
                 self.cm.Send([r.fit[:], MPI.DOUBLE], dest=0, tag=77)
                 
         self.result.minidx = np.argmin(r.fitness)
-        return r.get_chi(), r.get_fit()
+        return self.result
+        #return r.get_chi(), r.get_fit()
 
 class DiffEvolResult(FitResult):
     def __init__(self, npop, npar, bl, bw):
@@ -132,7 +137,7 @@ class DiffEvolResult(FitResult):
         return self.population[self.minidx,:]
 
 if __name__ == '__main__':
-    de = DiffEvol(lambda P: np.sum((P-1)**2), [[-2, 2], [-2, 2], [-2, 2]], 20, 100, seed=0)
+    de = DiffEvol(lambda P: np.sum((P-1)**2), [[-3, 2], [-2, 3], [-4, 2]], 50, 200, seed=0)
     de()
         
     if de.rank == 0:

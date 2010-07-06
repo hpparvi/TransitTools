@@ -21,9 +21,7 @@ class Fitter(object):
         pass
         
     def __call__(self):
-        r = self.fitter()
-        self.p_fit=r[1]
-        return r[0], r[1].copy()
+        return self.fitter()
 
     def generate_minfun(self, method='Chi'):
         """
@@ -272,8 +270,8 @@ class DiffEvolFitter(Fitter):
         return phase, flux
 
 class MCMCFitter(Fitter):
-    def __init__(self, time, flux, parm, n_chains=5, n_steps=100, mean_std=None, 
-                 ldbnd=None, binning=None, 
+    def __init__(self, time, flux, parm, p_sigma, n_chains=5, n_steps=100, mean_std=None, 
+                 ldp0=None, ldbnd=None, binning=None, 
                  seed=0, phase_lim=[-0.5, 0.5], 
                  oversample=False, verbose=True):
                      
@@ -282,17 +280,23 @@ class MCMCFitter(Fitter):
         self.parm  = parm
         self.ldbnd = asarray(ldbnd)
         self.bnds  = asarray([parm.p_low, parm.p_high]).transpose()
+        self.p_sigma = asarray(p_sigma)
         self.phase_lim = asarray(phase_lim)
         self.verbose = verbose
 
         self.mean_std = 1e-4 if mean_std is None else mean_std
         self.mean_inv_var = 1./self.mean_std**2
         
+        self.ldp0 = asarray(ldp0).ravel()
+        self.p0 = parm.p.copy()
+        self.p_free = np.abs(parm.p_high-parm.p_low) > 1e-6
+        
         ## --- Limb darkening parameters ---
         ## If limb darkening parameter bounds are definend, they 
         ## are concatenated to the parameter boundary vector.
         ##
         if ldbnd is not None:
+            self.p0 = np.concatenate((self.p0, self.ldp0))
             self.bnds = np.concatenate((self.bnds, self.ldbnd))
 
         self.tlc   = TransitLightCurve(parm, ldpar=np.zeros(self.ldbnd.shape[0]), mode='phase')
@@ -306,42 +310,25 @@ class MCMCFitter(Fitter):
             self.t_center = 0.5 * (parm.p_low[0] + parm.p_high[0])
             self.fit_center = True
             
-        ## --- Dynamic folding and binning --- 
-        ## If we are fitting the period, the data must be refolded
-        ## and rebinned for each fitting generation.
-        ##
-        if np.abs(parm.p_high[1]-parm.p_low[1]) < 1e-12:
-            self.dynamic_binning = False
-            phase = fold(self._time, parm.p_low[1], self.t_center, 0.5) - 0.5
-            pm = np.logical_and(phase>self.phase_lim[0], phase<self.phase_lim[1])
-            self.time_f = self._time[pm]
-            self.phase_f = 2.*np.pi * phase[pm]
-            self.flux_f = self._flux[pm]
-        else:
-            raise NotImplementedError
-            self.dynamic_binning = True
-            self.time_f = self._time
-            self.flux_f = self._flux
-            self.nbins = binning['nbins']
+        phase = fold(self._time, parm.p_low[1], self.t_center, 0.5) - 0.5
+        pm = np.logical_and(phase>self.phase_lim[0], phase<self.phase_lim[1])
+        self.time_f = self._time[pm]
+        self.phase_f = 2.*np.pi * phase[pm]
+        self.flux_f = self._flux[pm]
         
-        if binning is not None and not self.dynamic_binning:
-            #self.b_min = binning['min']
-            #self.b_max = binning['max']
+        self.dynamic_binning = False
+        
+        if binning is not None:
             if 'nbins' in binning.keys():
                 self.nbins = binning['nbins']
                 self._pb, self._fb, self._ferr = bin(self.phase_f, self.flux_f, self.nbins)
                 self.mean_inv_var = 1./self._ferr**2
-            else:
-                self.wbins = binning['wbins']
-                self.nbins = (self.b_max - self.b_min) / float(self.wbins)
-                self._pb, self._fb, self._ferr = bin(self.phase, self.flux, 
-                                                     bw=self.nbins, 
-                                                     lim=[self.b_min, self.b_max])
+
             self.phase_f = self._pb[self._fb == self._fb]
             self.flux_f  = self._fb[self._fb == self._fb]
 
         self.generate_minfun('Chi')
-        self.fitter = MCMC(self.minfun, p0=p0, p_limits=p_bnds, p_free=p_free, p_sigma=p_sigma, 
+        self.fitter = MCMC(self.minfun, p0=self.p0, p_limits=self.bnds, p_free=self.p_free, p_sigma=self.p_sigma, 
                            p_names=self.parm.p_names, p_descr=self.parm.p_descr, n_chains=n_chains, 
                            n_steps=n_steps,  seed=seed, verbose=True)
 
