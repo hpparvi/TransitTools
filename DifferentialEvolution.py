@@ -1,3 +1,9 @@
+"""
+Implements the differential evolution optimization method by Storn & Price
+(Storn, R., Price, K., Journal of Global Optimization 11: 341--359, 1997)
+
+.. moduleauthor:: Hannu Parviainen <hannu@iac.es>
+"""
 import numpy as np
 from numpy.random import random, randint
 from numpy import asarray
@@ -14,31 +20,31 @@ class DiffEvol(object):
     """
     Implements the differential evolution optimization method by Storn & Price
     (Storn, R., Price, K., Journal of Global Optimization 11: 341--359, 1997)
-    
-    Parameters:
-      fun      the function to be minimized
-      bounds   parameter bounds as [npar,2] array
-      npop     the size of the population (5*D - 10*D)
-      ngen     the number of generations to run
-      F        the difference amplification factor. Values of 0.5-0.8 are good
-               in most cases.
-      C        the cross-over probability. Use 0.9 to test for fast convergence,
-               and smaller values (~0.1) for a more elaborate search.
-    
-    N free parameters
-    N population vectors (pv1 .. pvN)
-    
-    Population = [pv1_x1 pv1_x2 pv1_x3 ... pv1_xN]
-                 [pv2_x1 pv2_x2 pv2_x3 ... pv2_xN]
-                 .
-                 .
-                 .
-                 [pvN_x1 pvN_x2 pvN_x3 ... pvN_xN]
-    
-    Population = [pv, parameter]
-    """ 
-    
+    """
     def __init__(self, fun, bounds, npop, ngen, F=0.5, C=0.5, id=0, size=1, seed=0, use_mpi=True, verbose=True):
+        """
+
+        :param fun: the function to be minimized
+        :param bounds: parameter bounds as [npar,2] array
+        :param npop:   the size of the population (5*D - 10*D)
+        :param  ngen:  the number of generations to run
+        :param  F:     the difference amplification factor. Values of 0.5-0.8 are good
+                       in most cases.
+        :param C:      The cross-over probability. Use 0.9 to test for fast convergence,
+                       and smaller values (~0.1) for a more elaborate search.
+        
+        N free parameters
+        N population vectors (pv1 .. pvN)
+        
+        Population = [pv1_x1 pv1_x2 pv1_x3 ... pv1_xN]
+                     [pv2_x1 pv2_x2 pv2_x3 ... pv2_xN]
+                     .
+                     .
+                     .
+                     [pvN_x1 pvN_x2 pvN_x3 ... pvN_xN]
+        
+        Population = [pv, parameter]
+        """ 
         self.minfun = fun
         self.bounds = asarray(bounds)
         self.n_gen  = ngen
@@ -124,6 +130,9 @@ class DiffEvol(object):
         #return r.get_chi(), r.get_fit()
 
 class DiffEvolResult(FitResult):
+    """
+    Encapsulates the results from the differential evolution fitting.
+    """
     def __init__(self, npop, npar, bl, bw):
         self.population = bl + random([npop, npar]) * bw
         self.fitness    = np.zeros(npop)
@@ -131,9 +140,11 @@ class DiffEvolResult(FitResult):
         self.fit        = self.fitness
 
     def get_chi(self):
+        """Returns the best-fit value of the minimized function."""
         return self.fitness[self.minidx]
     
     def get_fit(self):
+        """Returns the best-fit solution."""
         return self.population[self.minidx,:]
 
 if __name__ == '__main__':
