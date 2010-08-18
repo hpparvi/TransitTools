@@ -1,4 +1,8 @@
 #!/usr/bin/env python2.5
+"""
+Base
+====
+"""
 import numpy as np
 import logging
 

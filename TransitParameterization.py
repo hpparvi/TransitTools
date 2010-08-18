@@ -223,3 +223,12 @@ class KippingTransitParameterization(TransitParameterization):
         i = np.arccos(np.sqrt(b2)/a * (1.+e*np.sin(w)/(1.-e*e)))
             
         return np.array([self.t_c, np.sqrt(self.p2), a, i, e, w])
+
+def map_parameters(p, p_from, p_to):
+    if p.ndim > 1:
+        tp = p.copy()
+        for i in xrange(p.shape[0]):
+            tp[i, :5] = p_to.mapped_from_orbit_c(p_from.mapped_to_orbit_c(p[i, :5]))
+        return tp
+    
+    

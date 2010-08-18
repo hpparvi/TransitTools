@@ -40,7 +40,7 @@ class Fitter(object):
             fstr += '   phase_offset = 2.*np.pi*(self.t_center-p[0])/p[1]\n'
             pofs =  '+ phase_offset'
         else:
-            pofs += ''
+            pofs = ''
     
         if self.dynamic_binning:
             fstr += '   self.phase_f = fold(self._time, p[1], p[0], 0.5) - 0.5\n'
@@ -154,10 +154,11 @@ class TTVFitter(Fitter):
             phase /= 2.*np.pi
         return phase, flux
 
+
 class DiffEvolFitter(Fitter):
     def __init__(self, time, flux, parm, mean_std=None, ldbnd=None, binning=None, 
                  seed=0, npop=50, ngen=50, F=0.5, C=0.5, phase_lim=[-0.5, 0.5], 
-                 oversample=False, verbose=True):
+                 oversample=False, verbose=True, xtype='time'):
                      
         self._time = time
         self._flux = flux
@@ -194,7 +195,10 @@ class DiffEvolFitter(Fitter):
         ##
         if np.abs(parm.p_high[1]-parm.p_low[1]) < 1e-12:
             self.dynamic_binning = False
-            phase = fold(self._time, parm.p_low[1], self.t_center, 0.5) - 0.5
+            if xtype == 'time':
+                phase = fold(self._time, parm.p_low[1], self.t_center, 0.5) - 0.5
+            else:
+                phase = time
             pm = np.logical_and(phase>self.phase_lim[0], phase<self.phase_lim[1])
             self.time_f = self._time[pm]
             self.phase_f = 2.*np.pi * phase[pm]
@@ -269,11 +273,12 @@ class DiffEvolFitter(Fitter):
             phase /= 2.*np.pi
         return phase, flux
 
+
 class MCMCFitter(Fitter):
-    def __init__(self, time, flux, parm, p_sigma, n_chains=5, n_steps=100, mean_std=None, 
+    def __init__(self, time, flux, parm, p_sigma, p_free, n_chains=5, n_steps=100, mean_std=None, 
                  ldp0=None, ldbnd=None, binning=None, 
                  seed=0, phase_lim=[-0.5, 0.5], 
-                 oversample=False, verbose=True):
+                 oversample=False, verbose=True, use_mpi=True):
                      
         self._time = time
         self._flux = flux
@@ -289,7 +294,9 @@ class MCMCFitter(Fitter):
         
         self.ldp0 = asarray(ldp0).ravel()
         self.p0 = parm.p.copy()
-        self.p_free = np.abs(parm.p_high-parm.p_low) > 1e-6
+        self.p_free = p_free
+        
+        self.t_center = parm.p[0]
         
         ## --- Limb darkening parameters ---
         ## If limb darkening parameter bounds are definend, they 
@@ -303,14 +310,9 @@ class MCMCFitter(Fitter):
 
         ## -- Transit center fitting ---
         ##
-        if np.abs(parm.p_high[0]-parm.p_low[0]) < 1e-12:
-            self.t_center = parm.p_low[0]
-            self.fit_center = False
-        else:
-            self.t_center = 0.5 * (parm.p_low[0] + parm.p_high[0])
-            self.fit_center = True
+        self.fit_center = p_free[0]
             
-        phase = fold(self._time, parm.p_low[1], self.t_center, 0.5) - 0.5
+        phase = fold(self._time, parm.p[1], parm.p[0], 0.5) - 0.5
         pm = np.logical_and(phase>self.phase_lim[0], phase<self.phase_lim[1])
         self.time_f = self._time[pm]
         self.phase_f = 2.*np.pi * phase[pm]
@@ -330,7 +332,7 @@ class MCMCFitter(Fitter):
         self.generate_minfun('Chi')
         self.fitter = MCMC(self.minfun, p0=self.p0, p_limits=self.bnds, p_free=self.p_free, p_sigma=self.p_sigma, 
                            p_names=self.parm.p_names, p_descr=self.parm.p_descr, n_chains=n_chains, 
-                           n_steps=n_steps,  seed=seed, verbose=True)
+                           n_steps=n_steps,  seed=seed, verbose=True, use_mpi=use_mpi)
 
 def main():
     
