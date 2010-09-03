@@ -2,12 +2,12 @@ import sys
 import numpy   as np
 from Gimenez import  Gimenez
 from Orbit import CircularOrbit
-from TransitParameterization import PhysicalTransitParameterization as Physical
+from TransitParameterization import TransitParameterization
 
 class TransitLightCurve(object):
-    def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time'):
+    def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time', method='fortran'):
         self.parm  = parm 
-        self.model = model if model is not None else Gimenez(method='fortran')
+        self.model = model if model is not None else Gimenez(method=method)
         self.orbit = orbit if orbit is not None else CircularOrbit(mode=mode)
         self.ldpar = ldpar if ldpar is not None else []
         self.orbit.update(self.parm)
@@ -24,7 +24,7 @@ class TransitLightCurve(object):
 
 class TestLightCurve(TransitLightCurve):
     def __init__(self, tc=1., P=4., p=0.1, a=10., b=0., noise=1e-3,  ldpar=None, mode='time', time_lim=[0., 6.], resolution=500):
-        parm = Physical([tc, P, p, a, b])
+        parm = TransitParameterization('physical', [tc, P, p, a, b])
         super(TestLightCurve, self).__init__(parm, ldpar=ldpar, mode=mode)
         self.noise = noise
         self.resolution = resolution

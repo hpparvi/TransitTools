@@ -1,10 +1,19 @@
 import numpy as np
 import sys
+from types import MethodType
 from string import Template
-from math import cos, acos, sqrt
+from math import sin, cos, asin, acos, sqrt
 from base import *
 
+##--- CLASSES ---
+##
 class Mapping(object):
+    """Mapping to derive a parameter from a parameter set.
+    
+    Describes a way to derive a parameter A depending on parameter 
+    set [b, c, d, ...]
+    """
+
     __slots__ = ['name','dependencies','mapping']
 
     def __init__(self, name, dependencies, mapping):
@@ -24,6 +33,8 @@ class Mapping(object):
 
 
 class TransitParameter(object):
+    """A Physical parameter with name, description and unit."""
+
     __slots__ = ['name','description','unit','mappings']
 
     def __init__(self, name, description, unit):
@@ -33,38 +44,16 @@ class TransitParameter(object):
         
 
 class TransitParameterization(object):
-
-    parameters = {'tc' : TransitParameter('tc',  'transit center',       'HJD'),
-                  'P'  : TransitParameter( 'P',          'period',         'd'),
-                  'p'  : TransitParameter( 'p',    'radius ratio',    'R_star'),
-                  'a'  : TransitParameter( 'a', 'semi-major axis',    'R_star'),
-                  'i'  : TransitParameter( 'i',     'inclination',          ''),
-                  'b'  : TransitParameter( 'b', 'impact parameter',         ''),
-                  'p2' : TransitParameter('p2', 'squared radius ratio',     ''),
-                  'it' : TransitParameter('it', 'transit width parameter',  ''),
-                  'b2' : TransitParameter('b2', 'squared impact parameter', '')}
-
-    parameterizations   = {'orbit'    : ['tc', 'P', 'p',  'a',  'i'],
-                           'physical' : ['tc', 'P', 'p',  'a',  'b'],
-                           'kipping'  : ['tc', 'P', 'p2', 'it', 'b2']}
-
-    mappings = { 'p' : [Mapping('p',           ['p2'], '$p = sqrt($p2)'    )],
-                 'a' : [Mapping('a',  ['P','it','b2'], '$a = sqrt( (1.-$b2) / sin(TWO_PI/($P*$it))**2 + $b2)')],
-                 'b' : [Mapping('b',        ['a','i'], '$b = $a*cos($i)'   ),
-                        Mapping('b',           ['b2'], '$b = sqrt($b2)'    )],
-                 'i' : [Mapping('i',        ['a','b'], '$i = acos($b/$a)'  )],
-                'b2' : [Mapping('b2',           ['b'], '$b2 = $b*$b'       ),
-                        Mapping('b2',       ['a','i'], '$b2 = ($a*cos($i))**2')],
-                'it' : [Mapping('it',   ['a','i','P'], '$it = TWO_PI/$P/asin(sqrt(1.-$a*$a*cos($i)**2)/($a*sin($i)))')],
-                'p2' : [Mapping('p2',           ['p'], '$p2 = $p*$p'       )]}
-
+    """A set of parameters completely parameterizing a planetary transit."""
 
     def __init__(self, type, init=None):
-        if type in self.parameterizations.keys():
+        if type in parameterizations.keys():
             self.type = type
-            self.parameter_set = self.parameterizations[type]
+            self.parameter_set = parameterizations[type]
             self.parameter_vector = (np.asarray(init) if init is not None and np.asarray(init).size == len(self.parameter_set) 
                                      else np.zeros(len(self.parameter_set)))
+            self.npar = self.parameter_vector.size
+
             self.tp = self.type
             self.ps = self.parameter_set
             self.pv = self.parameter_vector
@@ -72,25 +61,61 @@ class TransitParameterization(object):
             logging.error("Bad parameterization type %s!"%type)
             sys.exit()
 
+        self.map_to_orbit = MethodType(generate_mapping(self.type, 'orbit'), self, TransitParameterization)
+
     def __str__(self):
         istr = '\n%s transit parameterization\n\n' %self.type.capitalize()
         for p,v in zip(self.ps, self.pv):
-            istr += '    %-20s %6.3f\n' %(self.parameters[p].description, v)
+            istr += '    %-20s %6.3f\n' %(parameters[p].description, v)
         return istr
 
-    def update(p):
+    def __getitem__(self, i):
+        return self.pv[i]
+
+    def update(self, p):
         self.parameter_vector = p.copy()
         self.pv = self.parameter_vector
 
     def generate_mapping(self, p_from, p_to):
-        s_from = self.parameterizations[p_from]
-        s_to   = self.parameterizations[p_to]
+        s_from = parameterizations[p_from]
+        s_to   = parameterizations[p_to]
 
-TP = TransitParameterization
 
+##--- TABLES ---
+##
+parameters = {'tc' : TransitParameter('tc',  'transit center',       'HJD'),
+              'P'  : TransitParameter( 'P',          'period',         'd'),
+              'p'  : TransitParameter( 'p',    'radius ratio',    'R_star'),
+              'a'  : TransitParameter( 'a', 'semi-major axis',    'R_star'),
+              'i'  : TransitParameter( 'i',     'inclination',          ''),
+              'b'  : TransitParameter( 'b', 'impact parameter',         ''),
+              'p2' : TransitParameter('p2', 'squared radius ratio',     ''),
+              'it' : TransitParameter('it', 'transit width parameter',  ''),
+              'b2' : TransitParameter('b2', 'squared impact parameter', '')}
+
+parameterizations   = {'orbit'    : ['tc', 'P', 'p',  'a',  'i'],
+                       'physical' : ['tc', 'P', 'p',  'a',  'b'],
+                       'kipping'  : ['tc', 'P', 'p2', 'it', 'b2']}
+
+mappings = { 'p' : [Mapping('p',           ['p2'], '$p = sqrt($p2)'    )],
+             'a' : [Mapping('a',  ['P','it','b2'], '$a = sqrt( (1.-$b2) / sin(TWO_PI/($P*$it))**2 + $b2)')],
+             'b' : [Mapping('b',        ['a','i'], '$b = $a*cos($i)'   ),
+                    Mapping('b',           ['b2'], '$b = sqrt($b2)'    )],
+             'i' : [Mapping('i',        ['a','b'], '$i = acos($b/$a)'  ),
+                    Mapping('i',       ['a','b2'], '$i = acos(sqrt($b2)/$a)'  ),
+                    Mapping('i',  ['P','it','b2'], '$i = acos(sqrt($b2)/sqrt((1.-$b2)/sin(TWO_PI/($it*$P))**2+$b2))'  )],
+            'b2' : [Mapping('b2',           ['b'], '$b2 = $b*$b'       ),
+                    Mapping('b2',       ['a','i'], '$b2 = ($a*cos($i))**2')],
+            'it' : [Mapping('it',   ['a','i','P'], '$it = TWO_PI/$P/asin(sqrt(1.-$a*$a*cos($i)**2)/($a*sin($i)))'),
+                    Mapping('it',   ['a','b','P'], '$it = TWO_PI/$P/asin(sqrt(1.-$b**2)/($a*sin(acos($b/$a))))')],
+            'p2' : [Mapping('p2',           ['p'], '$p2 = $p*$p'       )]}
+
+
+##--- FUNCTIONS ---
+##
 def generate_mapping(p_from, p_to):
-    s_from  = TransitParameterization.parameterizations[p_from]
-    s_to    = TransitParameterization.parameterizations[p_to]
+    s_from  = parameterizations[p_from]
+    s_to    = parameterizations[p_to]
 
     map_str  = 'def mapping(p_from):\n'
     map_str += '    if isinstance(p_from, TransitParameterization):\n'
@@ -103,10 +128,10 @@ def generate_mapping(p_from, p_to):
         if p in s_from:
             map_str += '    v_to[%i] = v_from[%i]\n' %(i, s_from.index(p))
         else:
-            for mapping in TP.mappings[p]:
+            for mapping in mappings[p]:
                 if mapping.is_mappable(s_from): break
             else:
-                logging.error("Couldn't find suitable mapping for %s:%s." %(p,str(mapping.dependencies)))
+                logging.error("Couldn't find suitable mapping %s -> %s for %s:%s." %(p_from, p_to, p,str(mapping.dependencies)))
                 sys.exit()
 
             map_str += mapping.get_mapping(s_from, s_to)+'\n'
@@ -120,19 +145,19 @@ def generate_mapping(p_from, p_to):
     return mapping
 
 
-print TP.parameterizations['orbit']
-print TP.parameterizations['physical']
+# print parameterizations['orbit']
+# print parameterizations['physical']
 
-pp = TransitParameterization('physical',[1,2,3,4,0.9])
-po = TransitParameterization('orbit')
+# pp = TransitParameterization('physical',[1,2,3,4,0.9])
+# po = TransitParameterization('orbit')
 
-o2p = generate_mapping('orbit','physical')
-p2o = generate_mapping('physical','orbit')
+# o2p = generate_mapping('orbit','physical')
+# p2o = generate_mapping('physical','orbit')
 
-po = p2o(pp)
+# po = p2o(pp)
 
-print pp
-print po
+# print pp
+# print po
 
 
 # class TransitParameterization(object):

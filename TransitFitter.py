@@ -2,16 +2,14 @@ import sys
 import numpy as np
 import pylab as pl
 
+from numpy import array
+
 from types import MethodType
 from numpy import asarray
 
-from TransitParameterization import PhysicalTransitParameterization as tpp
-from TransitParameterization import KippingTransitParameterization as tpk
-
 from TransitLightCurve import TransitLightCurve
-from diffeval import de
-from base import fold
-from futils import bin
+
+from utilities import bin, fold
 
 from DifferentialEvolution import DiffEvol
 from MCMC import MCMC
@@ -23,12 +21,17 @@ class Fitter(object):
     def __call__(self):
         return self.fitter()
 
-    def generate_minfun(self, method='Chi'):
+    def generate_minfun(self, method='Chi', b_low=None, b_high=None):
         """
         Generates the minimized function dynamically based on simulation parameters.
         """
         
         fstr = "def minfun(self, p):\n"
+        if b_low is not None:
+            fstr += "   if np.any(p[:%i] < %s):  return 1e18\n" %(b_low.size, repr(b_low))
+        if b_high is not None:
+            fstr += "   if np.any(p[:%i] > %s):  return 1e18\n" %(b_high.size, repr(b_high))
+
         if self.ldbnd is not None:
             nldp = self.ldbnd.shape[0]
             if nldp == 1:
@@ -156,15 +159,15 @@ class TTVFitter(Fitter):
 
 
 class DiffEvolFitter(Fitter):
-    def __init__(self, time, flux, parm, mean_std=None, ldbnd=None, binning=None, 
+    def __init__(self, time, flux, p, p_low, p_high, mean_std=None, ldbnd=None, binning=None, 
                  seed=0, npop=50, ngen=50, F=0.5, C=0.5, phase_lim=[-0.5, 0.5], 
                  oversample=False, verbose=True, xtype='time'):
                      
         self._time = time
         self._flux = flux
-        self.parm  = parm
+        self.parm  = p
         self.ldbnd = asarray(ldbnd)
-        self.bnds  = asarray([parm.p_low, parm.p_high]).transpose()
+        self.bnds  = asarray([p_low, p_high]).transpose()
         self.phase_lim = asarray(phase_lim)
         self.verbose = verbose
 
@@ -178,25 +181,25 @@ class DiffEvolFitter(Fitter):
         if ldbnd is not None:
             self.bnds = np.concatenate((self.bnds, self.ldbnd))
 
-        self.tlc   = TransitLightCurve(parm, ldpar=np.zeros(self.ldbnd.shape[0]), mode='phase')
+        self.tlc   = TransitLightCurve(p, ldpar=np.zeros(self.ldbnd.shape[0]), mode='phase')
 
         ## -- Transit center fitting ---
         ##
-        if np.abs(parm.p_high[0]-parm.p_low[0]) < 1e-12:
-            self.t_center = parm.p_low[0]
+        if np.abs(p_high[0]-p_low[0]) < 1e-12:
+            self.t_center = p_low[0]
             self.fit_center = False
         else:
-            self.t_center = 0.5 * (parm.p_low[0] + parm.p_high[0])
+            self.t_center = 0.5 * (p_low[0] + p_high[0])
             self.fit_center = True
             
         ## --- Dynamic folding and binning --- 
         ## If we are fitting the period, the data must be refolded
         ## and rebinned for each fitting generation.
         ##
-        if np.abs(parm.p_high[1]-parm.p_low[1]) < 1e-12:
+        if np.abs(p_high[1]-p_low[1]) < 1e-12:
             self.dynamic_binning = False
             if xtype == 'time':
-                phase = fold(self._time, parm.p_low[1], self.t_center, 0.5) - 0.5
+                phase = fold(self._time, p_low[1], self.t_center, 0.5) - 0.5
             else:
                 phase = time
             pm = np.logical_and(phase>self.phase_lim[0], phase<self.phase_lim[1])
@@ -226,8 +229,12 @@ class DiffEvolFitter(Fitter):
             self.phase_f = self._pb[self._fb == self._fb]
             self.flux_f  = self._fb[self._fb == self._fb]
 
-        self.generate_minfun('Chi')
-        self.fitter = DiffEvol(self.minfun, self.bnds, npop, ngen, F, C, seed=seed, verbose=True)
+        self.generate_minfun('Chi', b_low=p_low, b_high=p_high)
+        self.fitter = DiffEvol(self.minfun, self.bnds, npop, ngen, F, C, seed=seed, verbose=verbose)
+
+        #pl.plot(self.phase_f, self.flux_f)
+        #pl.plot(time, flux)
+        #pl.show()
 
 #    testsrc = """
 #    subroutine g()

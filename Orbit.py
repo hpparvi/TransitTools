@@ -8,7 +8,7 @@ class Orbit(object):
         self.p = p
 
     def update(self, tp):
-        self.p = tp.mapped_to_orbit()
+        self.p = tp.map_to_orbit()
 
     def get_transit_center(self):
         return self.p[0]
