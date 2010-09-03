@@ -7,6 +7,16 @@ module Gimenez_f
   integer, parameter :: FD = C_DOUBLE
 
 contains
+#ifdef __GFORTRAN__
+#if __GNUC_MINOR__ < 4
+  real(8) pure function log_gamma(x)
+    implicit none
+    real(8), intent(in) :: x
+    log_gamma = log(gamma(x))
+  end function log_gamma
+#endif
+#endif
+
   subroutine Gimenez(nz, nu, z, r, u, npol, res, nt)
     use omp_lib
     implicit none
