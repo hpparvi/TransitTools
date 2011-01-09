@@ -1,9 +1,19 @@
-import numpy as np
-import unittest
+"""Defines the planet orbit.
 
-from numpy.testing import assert_almost_equal as aeq
+Orbit class defines the orbit of the planet, and is used to compute everything 
+related to the orbit.
+"""
+import numpy as np
 
 class Orbit(object):
+    """
+    Circular orbit parameterized by
+        tc  transit center time [d]
+        P    period [d]
+        p    ratio of the planet radius to the stellar radius
+        a    semi-major axis divided by the stellar radius
+        i    inclination [rad]
+    """
     def __init__(self, p=None):
         self.p = p
 
@@ -30,14 +40,7 @@ class Orbit(object):
 
 
 class CircularOrbit(Orbit):
-    """
-    Circular orbit parameterized by
-        tc  transit center time [d]
-        P    period [d]
-        p    ratio of the planet radius to the stellar radius
-        a    semi-major axis divided by the stellar radius
-        i    inclination [rad]
-    """
+
     def __init__(self, p=None, mode='time'):
         self.p = p
         modes = {'time': self.projected_distance_t, 
@@ -112,8 +115,28 @@ def projected_distance_c_t(t, t_c, P, a, i):
         n  = 2.*np.pi/P
         return a*np.sqrt(np.sin(n*dt)**2 + (np.cos(i)*np.cos(n*dt))**2)
 
+def projected_distance_c_t_fortran(n=None, fname=None):
+    dimstr = ", dimension(%i)" %n if n is not None else "" 
+    fname  = fname if fname is not None else "projected_distance"
+    src_str  = "pure function %s(t, t_c, p, a, i)\n\timplicit none\n"%fname
+    src_str += "\treal(8), intent(in)%s :: t, t_c, p, a, i\n\treal(8), intent(out)%s :: z\n\treal(8)%s :: dt,n" %(dimstr, dimstr, dimstr)
+    src_str += "\tdt = t - t_c\n"
+    src_str += "\tn  = 2.*pi/P\n"
+    src_str += "\tz  = a*sqrt(sin(n*dt)**2 + (cos(i)*cos(n*dt))**2)\n"
+    src_str += "end function %s"%fname
+    return src_str
+
 def projected_distance_c_p(p, a, i):
         return a*np.sqrt(np.sin(p)**2 + (np.cos(i)*np.cos(p))**2)
+
+def projected_distance_c_p_fortran(n=None, fname=None):
+    dimstr = ", dimension(%i)" %n if n is not None else "" 
+    fname  = fname if fname is not None else "projected_distance"
+    src_str  = "pure function %s(p, a, i)\n\timplicit none\n" %fname
+    src_str += "\treal(8), intent(in)%s :: p, a, i\n\treal(8), intent(out)%s :: z\n" %(dimstr, dimstr)
+    src_str += "\tz  = a*sqrt(sin(p)**2 + (cos(i)*cos(p))**2)\n"
+    src_str += "end function %s" %fname
+    return src_str
 
 def projected_distance_e_t(t, t_c, P, i, e, w, a):
         #FIXME: projected_distance_e_t should be fixed.
@@ -131,12 +154,14 @@ def projected_distance_e_p(t, t_c, P, i, e, w, a):
         n  = 2.*np.pi/P * (1.+e*np.sin(w))**2 / (1.-e*e)**1.5
         return a*np.sqrt(np.sin(n*dt)**2 + (np.cos(i)*np.cos(n*dt))**2)
 
-
 if __name__ == '__main__':
     from math import radians
     
     p = np.array([0.5, 2, 0.1, 10, 0.5*np.pi])
     o = CircularOrbit(p)
+    
+    print projected_distance_c_t_fortran(np.random.random(10), fname='pd_t')
+    print projected_distance_c_p_fortran()
     
     print o.transit_duration()
     print o.transit_duration_simple()

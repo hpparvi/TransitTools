@@ -154,6 +154,7 @@ def construct_Gimenez(npoints, npol, nldcoeff, nthreads=0, build_module=False):
     
     return code
 
-f = open('tmp.f90', 'w')
-f.write(construct_Gimenez(100, 10, 2, 4, True))
-f.close()
+if __name__ == "__main__":
+    f = open('tmp.f90', 'w')
+    f.write(construct_Gimenez(100, 10, 2, 4, True))
+    f.close()

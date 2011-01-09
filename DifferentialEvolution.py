@@ -93,14 +93,14 @@ class DiffEvol(object):
                 v = r.pop[t[0],:] + self.F * (r.pop[t[1],:] - r.pop[t[2],:])
                 crossover = random(self.n_parm) <= self.C
                 u = r.pop[i,:].copy()
-                u[crossover] = v[crossover]
+                u[crossover] = v[crossover].copy()
                 ri = randint(self.n_parm)
-                u[ri] = v[ri]
+                u[ri] = v[ri].copy()
                 ufit = self.minfun(u)
     
                 if ufit < r.fitness[i]:
-                    r.pop[i,:] = u[:]
-                    r.fit[i]   = ufit
+                    r.pop[i,:] = u[:].copy()
+                    r.fit[i]   = ufit.copy()
                             
             logging.info('Node %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min()))
         
@@ -127,7 +127,7 @@ class DiffEvol(object):
                 
         self.result.minidx = np.argmin(r.fitness)
         return self.result
-        #return r.get_chi(), r.get_fit()
+
 
 class DiffEvolResult(FitResult):
     """

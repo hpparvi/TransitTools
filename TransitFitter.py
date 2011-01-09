@@ -16,10 +16,14 @@ from MCMC import MCMC
 
 class Fitter(object):
     def __init__(self): 
-        pass
+        self.result = None
+        self.p_fit  = None
+        self.minfun = None
         
     def __call__(self):
-        return self.fitter()
+        self.result = self.fitter()
+        self.p_fit  = self.result.get_fit()
+        return self.result
 
     def generate_minfun(self, method='Chi', b_low=None, b_high=None):
         """
