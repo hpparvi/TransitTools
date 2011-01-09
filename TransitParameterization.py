@@ -28,8 +28,6 @@ class Mapping(object):
     set [b, c, d, ...]
     """
 
-    __slots__ = ['name','dependencies','mapping']
-
     def __init__(self, name, dependencies, mapping):
         self.name = name
         self.dependencies = dependencies
@@ -49,13 +47,11 @@ class Mapping(object):
 class TransitParameter(object):
     """A Physical parameter with name, description and unit."""
 
-    __slots__ = ['name','description','unit','mappings']
-
     def __init__(self, name, description, unit):
         self.name = name
         self.description = description
         self.unit = unit
-        
+
 
 class TransitParameterization(object):
     """A set of parameters completely parameterizing a planetary transit."""
@@ -98,21 +94,21 @@ class TransitParameterization(object):
 ##--- TABLES ---
 ##
 parameters = {'tc' : TransitParameter('tc',  'transit center',       'HJD'),
-              'P'  : TransitParameter( 'P',          'period',         'd'),
-              'p'  : TransitParameter( 'p',    'radius ratio',    'R_star'),
+              'p'  : TransitParameter( 'p',          'period',         'd'),
+              'k'  : TransitParameter( 'k',    'radius ratio',    'R_star'),
               'a'  : TransitParameter( 'a', 'semi-major axis',    'R_star'),
               'i'  : TransitParameter( 'i',     'inclination',   'radians'),
               'b'  : TransitParameter( 'b', 'impact parameter',         ''),
-              'p2' : TransitParameter('p2', 'squared radius ratio',     ''),
+              'k2' : TransitParameter('k2', 'squared radius ratio',     ''),
               'it' : TransitParameter('it', 'transit width parameter',  ''),
               'b2' : TransitParameter('b2', 'squared impact parameter', '')}
 
-parameterizations   = {'orbit'    : ['tc', 'P', 'p',  'a',  'i'],
-                       'physical' : ['tc', 'P', 'p',  'a',  'b'],
-                       'kipping'  : ['tc', 'P', 'p2', 'it', 'b2']}
+parameterizations   = {'orbit'    : ['k',  'tc', 'p',  'a',  'i'],
+                       'physical' : ['k',  'tc', 'p',  'a',  'b'],
+                       'kipping'  : ['k2', 'tc', 'p', 'it', 'b2']}
 
-mappings = { 'p' : [Mapping('p',           ['p2'], '$p = sqrt($p2)'    )],
-             'a' : [Mapping('a',  ['P','it','b2'], '$a = sqrt( (1.-$b2) / sin(TWO_PI/($P*$it))**2 + $b2)')],
+mappings = { 'k' : [Mapping('k',           ['k2'], '$k = sqrt($k2)'    )],
+             'a' : [Mapping('a',  ['p','it','b2'], '$a = sqrt( (1.-$b2) / sin(TWO_PI/($p*$it))**2 + $b2)')],
              'b' : [Mapping('b',        ['a','i'], '$b = $a*cos($i)'   ),
                     Mapping('b',           ['b2'], '$b = sqrt($b2)'    )],
              'i' : [Mapping('i',        ['a','b'], '$i = acos($b/$a)'  ),
@@ -122,7 +118,7 @@ mappings = { 'p' : [Mapping('p',           ['p2'], '$p = sqrt($p2)'    )],
                     Mapping('b2',       ['a','i'], '$b2 = ($a*cos($i))**2')],
             'it' : [Mapping('it',   ['a','i','P'], '$it = TWO_PI/$P/asin(sqrt(1.-$a*$a*cos($i)**2)/($a*sin($i)))'),
                     Mapping('it',   ['a','b','P'], '$it = TWO_PI/$P/asin(sqrt(1.-$b**2)/($a*sin(acos($b/$a))))')],
-            'p2' : [Mapping('p2',           ['p'], '$p2 = $p*$p'       )]}
+            'p2' : [Mapping('k2',           ['k'], '$k2 = $k*$k'       )]}
 
 
 ##--- FUNCTIONS ---
@@ -157,6 +153,7 @@ def generate_mapping(p_from, p_to):
 
     exec map_str
     return mapping
+
 
 def generate_fortran_mapping(p_from, p_to, fname=None):
     s_from  = parameterizations[p_from]

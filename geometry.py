@@ -14,17 +14,17 @@ class Geometry(object):
 
     Geometry class defines the geometry of the planet and its orbit.
 
-    The parameter vector divides into separate parts. First the
+    The parameter vector divides into separate parts. First comes the
         [0] k  [Rs]  planet to star radius ratio
 
-    Next, the parameters for a circular orbit 
-        [1] t0 [d]   transit center [d]
-        [2] P  [d]   period         [d]
+    next, the parameters for a circular orbit 
+        [1] t0 [d]   transit center
+        [2] P  [d]   period        
         [3] a  [Rs]  semi-major axis divided by the stellar radius
         [4] i  [rad] inclination [rad]
 
     and the parameters introduced by eccentricity
-        [5] e  [-]   eccentricity
+        [5] e  [ - ] eccentricity
         [6] w  [rad] argument of pericenter
 
     Finally, additional geometry parameters can be included with
