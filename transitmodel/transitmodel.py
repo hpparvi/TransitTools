@@ -1,0 +1,1 @@
+class TransitModel(object): pass

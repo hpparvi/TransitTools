@@ -1,6 +1,6 @@
 """A set of utility functions including binning and folding."""
 
-from base import *
+from core import *
 import numpy as np
 
 try:

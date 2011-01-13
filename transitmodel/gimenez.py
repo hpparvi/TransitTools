@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 import numpy as np
 from scipy.special import jacobi, gamma, gammaln
-import base
 
-double = np.float32
+from transitLightCurve.core import *
+from transitmodel import TransitModel
 
-class Gimenez(base.transitShape):
+class Gimenez(TransitModel):
     """Implements the transit model by A. Gimenez (A&A 450, 1231--1237, 2006)."""
 
     def __init__(self, method='python', n_threads=0, float_t=np.float32):
@@ -28,9 +28,9 @@ class Gimenez(base.transitShape):
         Transit light curve model by A. Gimenez (A&A 450, 1231--1237, 2006).
         """
  
-        z = np.array(z, np.float32)
-        u = np.array(u, np.float32)
-        r = double(r)
+        z = np.array(z, DOUBLE)
+        u = np.array(u, DOUBLE)
+        r = DOUBLE(r)
 
         def alpha(b, c, n, jn):
 
@@ -40,7 +40,7 @@ class Gimenez(base.transitShape):
             d = self.jacobi_Burkardt(jn, 0., 1. + nu, 1. - 2. * c**2)
             e = self.jacobi_Burkardt(jn, nu, 1.,      1. - 2. * (1. - b))
 
-            sum = double(0.0)
+            sum = DOUBLE(0.0)
 
             for j in range(jn):
                 nm = gammaln(nu+j+1.) - gammaln(j+2.)
@@ -55,18 +55,18 @@ class Gimenez(base.transitShape):
 
         mask = z < (1.+r)
 
-        a = np.zeros([u.size+1, mask.sum()], double)
+        a = np.zeros([u.size+1, mask.sum()], DOUBLE)
 
         b = r/(1.+r)
         c = z[mask]/(1.+r)
 
         n = np.arange(u.size+1)
-        f = np.ones(z.size, double)
+        f = np.ones(z.size, DOUBLE)
 
         for i in n:
             a[i,:] = alpha(b, c, i, npol)
 
-        Cn = np.ones(u.size+1, double)
+        Cn = np.ones(u.size+1, DOUBLE)
 
         if u.size > 0:
             Cn[0] = (1. - u[:].sum()) / (1. - (n[1:] * u[:] / (n[1:]+2.)).sum())
@@ -83,7 +83,7 @@ class Gimenez(base.transitShape):
             sys.exit()
 
         if cx is None:
-            cx = np.zeros([n+1, x.size], np.double)
+            cx = np.zeros([n+1, x.size], DOUBLE)
 
         cx[0, :] = 1.
 
@@ -91,7 +91,7 @@ class Gimenez(base.transitShape):
             cx[1, :] = ( 1. + 0.5 * ( alpha + beta ) ) * x + 0.5 * ( alpha - beta )
 
             for i in range(2,n):
-                ri = double(i)
+                ri = DOUBLE(i)
                 c1 = 2. * ri * ( ri + alpha + beta ) * ( 2. * ri - 2. + alpha + beta )
                 c2 = ( 2.* ri - 1. + alpha + beta ) * ( 2. * ri  + alpha + beta ) * ( 2.* ri - 2. + alpha + beta )
                 c3 = ( 2.* ri - 1. + alpha + beta ) * ( alpha + beta ) * ( alpha - beta )

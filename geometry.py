@@ -7,7 +7,10 @@ Author
 Date
   9.1.2011  
 """
-from numpy import asarray, pi, sin, cos, sqrt
+from numpy import asarray, array, zeros, sin, cos, sqrt
+
+from transitparameterization import TransitParameterization
+from core import *
 
 class Geometry(object):
     """Defines the planetary orbit and the planet to star radius ratio.
@@ -46,8 +49,11 @@ class Geometry(object):
         except Keyerror:
             raise ValueError
 
-        self.pv = asarray(p)
-        assert p.size == self.npar
+        if p is None:
+            self.pv = zeros(self.npar)
+        else:
+            assert p.size == self.npar
+            self.pv = asarray(p)
 
         self.k  = self.pv[0:1]
         self.t0 = self.pv[1:2]
@@ -65,7 +71,7 @@ class Geometry(object):
 
 
     def update(self, tp):
-        self.p[:] = tp.map_to_orbit()
+        self.pv[:] = tp.map_to_orbit().pv
 
     def get_transit_center(self):
         return self.t0
@@ -102,7 +108,7 @@ class Geometry(object):
     ##
     def _projected_distance_c_t(self, t):
         dt = t - self.t0
-        n  = 2.*pi/self.p
+        n  = TWO_PI/self.p
         return self.a*sqrt(sin(n*dt)**2 + (cos(self.i)*cos(n*dt))**2)
 
     def _projected_distance_c_t_ftmpl(n=None, fname=None):
@@ -134,7 +140,7 @@ class Geometry(object):
         raise NotImplementedError
         dt = t - t_c
         r  = a*(1.-e*e)/(1.+e*sin(w))
-        n  = 2.*pi/P * (1.+e*sin(w))**2 / (1.-e*e)**1.5
+        n  = TWO_PI/P * (1.+e*sin(w))**2 / (1.-e*e)**1.5
         return a*sqrt(sin(n*dt)**2 + (cos(i)*cos(n*dt))**2)
 
     #FIXME: projected_distance_e_p for eccentric orbit is not implemented.
@@ -145,7 +151,7 @@ class Geometry(object):
 if __name__ == '__main__':
     from math import radians
     
-    p = np.array([0.1, 0.0, 2, 10, 0.5*np.pi])
+    p = array([0.1, 0.0, 2, 10, HALF_PI])
     g = Geometry(p)
 
     print g.projected_distance(0.0)

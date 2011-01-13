@@ -11,16 +11,15 @@ Date
   19.12.2010
 
 Modified
-  09.01.2011
-
+  13.01.2011
 """
-
-import numpy as np
 import sys
+import numpy as np
 from types import MethodType
 from string import Template
 from math import sin, cos, asin, acos, sqrt
-from base import *
+
+from core import *
 
 ##--- CLASSES ---
 ##
@@ -205,10 +204,11 @@ def generate_fortran_module(mappings):
     #compile(map_str, modulename='mapping', source_fn='%s.f90'%fn_name)
 
 if __name__ == '__main__':
-    generate_fortran_module([['kipping','physical']])
-    from mapping import pmap
-    a = pmap.map_kipping_to_physical(np.array([1,2,3,4,1], dtype=np.double))
-    print a
+    pass
+    #generate_fortran_module([['kipping','physical']])
+    #from mapping import pmap
+    #a = pmap.map_kipping_to_physical(np.array([1,2,3,4,1], dtype=np.double))
+    #print a
 
 # print parameterizations['orbit']
 # print parameterizations['physical']
