@@ -1,18 +1,16 @@
 import sys
 import numpy as np
-import pylab as pl
 
 from numpy import array
-
 from types import MethodType
 from numpy import asarray
 
-from TransitLightCurve import TransitLightCurve
+from TransitLightCurve.core import *
+from TransitLightCurve.transitlightcurve import TransitLightcurve
+from TransitLightCurve.utilities import bin, fold
 
-from utilities import bin, fold
-
-from DifferentialEvolution import DiffEvol
-from MCMC import MCMC
+from de import DiffEvol
+from mcmc import MCMC
 
 class Fitter(object):
     def __init__(self): 
@@ -346,6 +344,7 @@ class MCMCFitter(Fitter):
                            n_steps=n_steps,  seed=seed, verbose=True, use_mpi=use_mpi)
 
 def main():
+    import pylab as pl
     
     def t(arr):
         s = ''
@@ -365,9 +364,9 @@ def main():
     phase, mask = fold(time, 4., 1., clip_range=[0.45,  0.55])
     phase *= 2*np.pi
 
-    p_original = np.array([1., 4., 0.10, 5.0, 0.8, 0.25])
-    p_low      = np.array([1., 4., 0.05, 4.5, 0.5])
-    p_high     = np.array([1., 4., 0.15, 5.5, 0.9])
+    p_original = np.array([0.10, 1., 4., 5.0, 0.8, 0.25])
+    p_low      = np.array([0.05, 1., 4., 4.5, 0.5])
+    p_high     = np.array([0.15, 1., 4., 5.5, 0.9])
     p_bounds   = np.array([p_low, p_high]).transpose()
     
     parameterization_p = tpp(p_original[:5], p_low[:5], p_high[:5], eccentric=False)

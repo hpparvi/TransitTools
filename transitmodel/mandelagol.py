@@ -1,17 +1,8 @@
 import numpy    as np
-
-try:
-    import pyopencl as cl
-    WITH_OPENCL = True
-except ImportError:
-    WITH_OPENCL = False
-
 from numpy import sqrt, sin, arccos, pi
+from transitmodel import TransitModel
 
-from base import transitShape
-
-
-class MandelAgol(transitShape):
+class MandelAgol(transitModel):
 
     def __init__(self, use_fortran=True, use_openCL=True):
         #super().__init__()

@@ -5,10 +5,10 @@ Implements the differential evolution optimization method by Storn & Price
 .. moduleauthor:: Hannu Parviainen <hannu@iac.es>
 """
 import numpy as np
-from numpy.random import random, randint
-from numpy import asarray
+from numpy import asarray, tile
+from numpy.random import seed, random, randint
 
-from base import *
+from transitLightCurve.core import *
 
 try:
     from mpi4py import MPI
@@ -50,8 +50,8 @@ class DiffEvol(object):
         self.n_gen  = ngen
         self.n_pop  = npop
         self.n_parm = (self.bounds).shape[0]
-        self.bl = np.tile(self.bounds[:,0],[npop,1])
-        self.bw = np.tile(self.bounds[:,1]-self.bounds[:,0],[npop,1])
+        self.bl = tile(self.bounds[:,0],[npop,1])
+        self.bw = tile(self.bounds[:,1]-self.bounds[:,0],[npop,1])
         
         self.seed = seed
         self.F = F
@@ -139,16 +139,19 @@ class DiffEvolResult(FitResult):
         self.pop        = self.population
         self.fit        = self.fitness
 
-    def get_chi(self):
+    def get_fitness(self):
         """Returns the best-fit value of the minimized function."""
         return self.fitness[self.minidx]
+
+    def get_chi(self):
+        return self.get_fitness()
     
     def get_fit(self):
         """Returns the best-fit solution."""
         return self.population[self.minidx,:]
 
 if __name__ == '__main__':
-    de = DiffEvol(lambda P: np.sum((P-1)**2), [[-3, 2], [-2, 3], [-4, 2]], 50, 200, seed=0)
+    de = DiffEvol(lambda P: np.sum((P-2.2)**2), [[-3, 2], [-2, 3], [-4, 2]], 50, 200, seed=0)
     de()
         
     if de.rank == 0:
