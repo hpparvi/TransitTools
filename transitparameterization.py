@@ -18,6 +18,7 @@ import numpy as np
 from types import MethodType
 from string import Template
 from math import sin, cos, asin, acos, sqrt
+from numpy import asarray, array
 
 from core import *
 
@@ -49,10 +50,11 @@ class Mapping(object):
 class TransitParameter(object):
     """A Physical parameter with name, description and unit."""
 
-    def __init__(self, name, description, unit):
+    def __init__(self, name, description, unit, limits):
         self.name = name
         self.description = description
         self.unit = unit
+        self.limits = limits
 
 
 class TransitParameterization(object):
@@ -65,6 +67,15 @@ class TransitParameterization(object):
             self.parameter_vector = (np.asarray(init) if init is not None and np.asarray(init).size == len(self.parameter_set) 
                                      else np.zeros(len(self.parameter_set)))
             self.npar = self.parameter_vector.size
+            
+            self.parameter_definitions = []
+            self.parameter_units = []
+            self.parameter_limits = []
+
+            for p in self.parameter_set:
+                self.parameter_limits.append(parameters[p].limits)
+
+            self.parameter_limits = array(self.parameter_limits)
 
             self.tp = self.type
             self.ps = self.parameter_set
@@ -95,15 +106,16 @@ class TransitParameterization(object):
 
 ##--- TABLES ---
 ##
-parameters = {'tc' : TransitParameter('tc',  'transit center',       'HJD'),
-              'p'  : TransitParameter( 'p',          'period',         'd'),
-              'k'  : TransitParameter( 'k',    'radius ratio',    'R_star'),
-              'a'  : TransitParameter( 'a', 'semi-major axis',    'R_star'),
-              'i'  : TransitParameter( 'i',     'inclination',   'radians'),
-              'b'  : TransitParameter( 'b', 'impact parameter',         ''),
-              'k2' : TransitParameter('k2', 'squared radius ratio',     ''),
-              'it' : TransitParameter('it', 'transit width parameter',  ''),
-              'b2' : TransitParameter('b2', 'squared impact parameter', '')}
+## Format:                        [parameter]   [long name]        [units]  [limits]
+parameters = {'tc' : TransitParameter('tc',  'transit center',       'HJD', [-1e18, 1e18]),
+              'p'  : TransitParameter( 'p',          'period',         'd', [0, 1e18]),
+              'k'  : TransitParameter( 'k',    'radius ratio',    'R_star', [1e-3, 5e-1]),
+              'a'  : TransitParameter( 'a', 'semi-major axis',    'R_star', [1e00, 1e05]),
+              'i'  : TransitParameter( 'i',     'inclination',   'radians', [-HALF_PI, HALF_PI]),
+              'b'  : TransitParameter( 'b', 'impact parameter',         '', [0, 1]),
+              'k2' : TransitParameter('k2', 'squared radius ratio',     '', [1e-6, 5e-2]),
+              'it' : TransitParameter('it', 'transit width parameter',  '', [0,10]),
+              'b2' : TransitParameter('b2', 'squared impact parameter', '', [0, 1])}
 
 parameterizations   = {'orbit'    : ['k',  'tc', 'p',  'a',  'i'],
                        'physical' : ['k',  'tc', 'p',  'a',  'b'],
@@ -115,12 +127,12 @@ mappings = { 'k' : [Mapping('k',           ['k2'], '$k = sqrt($k2)'    )],
                     Mapping('b',           ['b2'], '$b = sqrt($b2)'    )],
              'i' : [Mapping('i',        ['a','b'], '$i = acos($b/$a)'  ),
                     Mapping('i',       ['a','b2'], '$i = acos(sqrt($b2)/$a)'  ),
-                    Mapping('i',  ['P','it','b2'], '$i = acos(sqrt($b2)/sqrt((1.-$b2)/sin(TWO_PI/($it*$P))**2+$b2))'  )],
+                    Mapping('i',  ['p','it','b2'], '$i = acos(sqrt($b2)/sqrt((1.-$b2)/sin(TWO_PI/($it*$p))**2+$b2))'  )],
             'b2' : [Mapping('b2',           ['b'], '$b2 = $b*$b'       ),
                     Mapping('b2',       ['a','i'], '$b2 = ($a*cos($i))**2')],
-            'it' : [Mapping('it',   ['a','i','P'], '$it = TWO_PI/$P/asin(sqrt(1.-$a*$a*cos($i)**2)/($a*sin($i)))'),
-                    Mapping('it',   ['a','b','P'], '$it = TWO_PI/$P/asin(sqrt(1.-$b**2)/($a*sin(acos($b/$a))))')],
-            'p2' : [Mapping('k2',           ['k'], '$k2 = $k*$k'       )]}
+            'it' : [Mapping('it',   ['a','i','p'], '$it = TWO_PI/$p/asin(sqrt(1.-$a*$a*cos($i)**2)/($a*sin($i)))'),
+                    Mapping('it',   ['a','b','p'], '$it = TWO_PI/$p/asin(sqrt(1.-$b**2)/($a*sin(acos($b/$a))))')],
+            'k2' : [Mapping('k2',           ['k'], '$k2 = $k*$k'       )]}
 
 
 ##--- FUNCTIONS ---
@@ -133,7 +145,7 @@ def generate_mapping(p_from, p_to):
     map_str += '    if isinstance(p_from, TransitParameterization):\n'
     map_str += '        v_from = p_from.pv\n'
     map_str += '    else:\n'
-    map_str += '        v_from = p_from\n\n'
+    map_str += '        v_from = asarray(p_from)\n\n'
     map_str += '    v_to = np.zeros(v_from.shape)\n\n'
 
     for i, p in enumerate(s_to):

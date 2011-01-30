@@ -7,7 +7,7 @@ Author
 Date
   9.1.2011  
 """
-from numpy import asarray, array, zeros, sin, cos, sqrt
+from numpy import asarray, array, zeros, sin, cos, sqrt, sign
 
 from transitparameterization import TransitParameterization
 from core import *
@@ -108,8 +108,10 @@ class Geometry(object):
     ##
     def _projected_distance_c_t(self, t):
         dt = t - self.t0
-        n  = TWO_PI/self.p
-        return self.a*sqrt(sin(n*dt)**2 + (cos(self.i)*cos(n*dt))**2)
+        ph = dt*TWO_PI/self.p
+        s = sign(-1*((dt/self.p + 0.25)%1-0.5))
+
+        return s * self.a*sqrt(sin(ph)**2 + (cos(self.i)*cos(ph))**2)
 
     def _projected_distance_c_t_ftmpl(n=None, fname=None):
         dimstr = ", dimension(%i)" %n if n is not None else "" 

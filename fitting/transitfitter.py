@@ -161,13 +161,12 @@ class TTVFitter(Fitter):
 
 
 class DiffEvolFitter(Fitter):
-    def __init__(self, time, flux, p, p_low, p_high, mean_std=None, ldbnd=None, binning=None, 
+    def __init__(self, time, flux, p_low, p_high, mean_std=None, ldbnd=None, binning=None, 
                  seed=0, npop=50, ngen=50, F=0.5, C=0.5, phase_lim=[-0.5, 0.5], 
                  oversample=False, verbose=True, xtype='time'):
                      
         self._time = time
         self._flux = flux
-        self.parm  = p
         self.ldbnd = asarray(ldbnd)
         self.bnds  = asarray([p_low, p_high]).transpose()
         self.phase_lim = asarray(phase_lim)

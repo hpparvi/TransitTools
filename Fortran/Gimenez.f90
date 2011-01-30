@@ -6,15 +6,15 @@ module Gimenez_f
   integer, parameter :: FD = C_DOUBLE
 
 contains
-#ifdef __GFORTRAN__
-#if __GNUC_MINOR__ < 4
-  real(8) pure function log_gamma(x)
-    implicit none
-    real(8), intent(in) :: x
-    log_gamma = log(gamma(x))
-  end function log_gamma
-#endif
-#endif
+!!$#ifdef __GFORTRAN__
+!!$#if __GNUC_MINOR__ < 4
+!!$  real(8) pure function log_gamma(x)
+!!$    implicit none
+!!$    real(8), intent(in) :: x
+!!$    log_gamma = log(gamma(x))
+!!$  end function log_gamma
+!!$#endif
+!!$#endif
 
   subroutine Gimenez(z, r, u, npol, nz, nu, nt, res, supersampling)
     use omp_lib
@@ -26,10 +26,14 @@ contains
     real(8), intent(out), dimension(nz) :: res
     integer, intent(in), optional :: supersampling
 
-    integer :: i, j, ss
+    logical, dimension(nz) :: tmask
+    real(8), dimension(nz) :: z_tr, tres
+
+    integer :: i, j, ss, nzt
     real(8) :: bw, hbw, ss_norm
 
     res = 1._fd
+    tmask = .false.
 
     !$ if (nt /= 0) call omp_set_num_threads(nt)
 
@@ -60,15 +64,39 @@ contains
 
     !!--- No supersampling ---
     !!
-    else
-       !$omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
-       do i = 1, nz
-          if (z(i) < 1._fd+r) then
-             res(i) = Gimenez_s(z(i), r, nu, u, npol)
-          end if
-       end do
-       !$omp end parallel do
+
+   else
+       tmask = z < 1._fd+r
+       ! $omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
+       forall(i = 1:nz, tmask(i))
+          res(i) = Gimenez_s(z(i), r, nu, u, npol)
+       end forall
+       ! $omp end parallel do
     end if
+
+!!$    else
+!!$       tmask = z(i) < 1._fd+r
+!!$       nzt   = count(tmask)
+!!$       z_tr = pack(z, tmask)
+!!$       !$omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
+!!$       do i = 1, nzt
+!!$          if (mod(i,10000) == 0) print *,i
+!!$          tres(i) = Gimenez_s(z_tr(i), r, nu, u, npol)
+!!$       end do
+!!$       !$omp end parallel do
+!!$       res = unpack(tres, tmask)
+!!$    end if
+
+!!$    else
+!!$       !$omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
+!!$       do i = 1, nz
+!!$          if (mod(i,10000) == 0) print *,i
+!!$          if (z(i) < 1._fd+r) then
+!!$             res(i) = Gimenez_s(z(i), r, nu, u, npol)
+!!$          end if
+!!$       end do
+!!$       !$omp end parallel do
+!!$    end if
 
   contains
     pure real(8) function Gimenez_s(z, r, nu, u, npol)
