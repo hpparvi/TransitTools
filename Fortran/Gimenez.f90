@@ -65,14 +65,14 @@ contains
     !!--- No supersampling ---
     !!
 
-   else
-       tmask = z < 1._fd+r
-       ! $omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
-       forall(i = 1:nz, tmask(i))
-          res(i) = Gimenez_s(z(i), r, nu, u, npol)
-       end forall
-       ! $omp end parallel do
-    end if
+!!$   else
+!!$       tmask = z < 1._fd+r
+!!$       ! $omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
+!!$       forall(i = 1:nz, tmask(i))
+!!$          res(i) = Gimenez_s(z(i), r, nu, u, npol)
+!!$       end forall
+!!$       ! $omp end parallel do
+!!$    end if
 
 !!$    else
 !!$       tmask = z(i) < 1._fd+r
@@ -87,16 +87,15 @@ contains
 !!$       res = unpack(tres, tmask)
 !!$    end if
 
-!!$    else
-!!$       !$omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
-!!$       do i = 1, nz
-!!$          if (mod(i,10000) == 0) print *,i
-!!$          if (z(i) < 1._fd+r) then
-!!$             res(i) = Gimenez_s(z(i), r, nu, u, npol)
-!!$          end if
-!!$       end do
-!!$       !$omp end parallel do
-!!$    end if
+    else
+       !$omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
+       do i = 1, nz
+          if (z(i) < 1._fd+r) then
+             res(i) = Gimenez_s(z(i), r, nu, u, npol)
+          end if
+       end do
+       !$omp end parallel do
+    end if
 
   contains
     pure real(8) function Gimenez_s(z, r, nu, u, npol)

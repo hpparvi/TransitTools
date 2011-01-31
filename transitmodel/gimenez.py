@@ -22,7 +22,7 @@ class Gimenez(TransitModel):
             self.shape = Gimenez_f.gimenez_f.gimenez
 
 
-    def __call__(self, z, r, u=[], npol=100, n_threads=0):
+    def __call__(self, z, r, u=[], npol=1000, n_threads=0):
         s = self.shape(z, r, u, npol, n_threads)
         return s
     

@@ -53,7 +53,10 @@ class TestLightcurve(TransitLightcurve):
 
     def __call__(self):
         flux = super(TestLightcurve, self).__call__(self.time)
-        flux += normal(0., self.noise, self.resolution)
+
+        if self.noise is not None:
+            flux += normal(0., self.noise, self.resolution)
+
         flux += self.continuum
 
         if self.badpoints is not None:
