@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import numpy as np
 
+from scipy import weave
 from scipy.special import jacobi, gamma, gammaln
 from numpy import exp
 
@@ -94,7 +95,8 @@ class Gimenez(TransitModel):
         cx[0, :] = 1.
         if n > 0:
             cx[1, :] = ( 1. + 0.5 * ( alpha + beta ) ) * x + 0.5 * ( alpha - beta )
-            for i in range(2,n):
+
+            for i in xrange(2,n):
                 ri = DOUBLE(i)
                 c1 = 2. * ri * ( ri + alpha + beta ) * ( 2. * ri - 2. + alpha + beta )
                 c2 = ( 2.* ri - 1. + alpha + beta ) * ( 2. * ri  + alpha + beta ) * ( 2.* ri - 2. + alpha + beta )

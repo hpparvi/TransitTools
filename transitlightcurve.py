@@ -28,7 +28,7 @@ class TransitLightcurve(object):
 
 class TestLightcurve(TransitLightcurve):
     def __init__(self, tc=1., p=4., k=0.1, a=10., b=0., noise=1e-3,  ldpar=None,
-                 mode='time', method='fortran', time_lim=[0., 2.], resolution=500,
+                 mode='time', method='fortran', time_lim=[0., 2.], resolution=1500,
                  variability=None, snoise=None):
 
         parm = TransitParameterization('physical', [k, tc, p, a, b])
