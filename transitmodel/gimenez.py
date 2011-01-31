@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import numpy as np
+
 from scipy.special import jacobi, gamma, gammaln
 from numpy import exp
 
@@ -18,11 +19,11 @@ class Gimenez(TransitModel):
         if method == 'python':
             self.shape   = self._shape_py
         elif method == 'fortran':
-            import Gimenez_f
-            self.shape = Gimenez_f.gimenez_f.gimenez
+            import gimenez_f
+            self.shape = gimenez_f.gimenez_f.gimenez
 
 
-    def __call__(self, z, r, u=[], npol=1000, n_threads=0):
+    def __call__(self, z, r, u=[], npol=100, n_threads=0):
         s = self.shape(z, r, u, npol, n_threads)
         return s
     

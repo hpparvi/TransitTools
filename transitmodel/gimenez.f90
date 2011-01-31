@@ -16,7 +16,7 @@ contains
 !!$#endif
 !!$#endif
 
-  subroutine Gimenez(z, r, u, npol, nz, nu, nt, res, supersampling)
+  subroutine Gimenez(z, r, u, npol, nz, nu, nt, res)
     use omp_lib
     implicit none
     integer, intent(in) :: nz, nu, nt, npol
@@ -24,7 +24,6 @@ contains
     real(8), intent(in), dimension(nu) :: u
     real(8), intent(in) :: r
     real(8), intent(out), dimension(nz) :: res
-    integer, intent(in), optional :: supersampling
 
     logical, dimension(nz) :: tmask
     real(8), dimension(nz) :: z_tr, tres
@@ -36,43 +35,6 @@ contains
     tmask = .false.
 
     !$ if (nt /= 0) call omp_set_num_threads(nt)
-
-    if(present(supersampling)) then
-       ss = supersampling
-    else
-       ss = 1
-    end if
-
-    !!--- Supersampling ---
-    !!
-    if (ss > 1) then
-       ss_norm = 1._fd / real(ss, fd)
-       !$omp parallel do &
-       !$omp shared(nz, nu, z, r, u, npol, res, ss, ss_norm) &
-       !$omp private(i, j, bw, hbw) &
-       !$omp schedule(dynamic)
-       do i = 1, nz
-          bw  = abs(z(i+1) - z(i))
-          hbw = 0.5_fd*bw
-          if (z(i) < 1._fd+r-hbw) then
-             do j = 1, ss
-                res(i) = res(i) + Gimenez_s(z(i), r, nu, u, npol)
-             end do
-          end if
-       end do
-       !$omp end parallel do
-
-    !!--- No supersampling ---
-    !!
-
-!!$   else
-!!$       tmask = z < 1._fd+r
-!!$       ! $omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
-!!$       forall(i = 1:nz, tmask(i))
-!!$          res(i) = Gimenez_s(z(i), r, nu, u, npol)
-!!$       end forall
-!!$       ! $omp end parallel do
-!!$    end if
 
 !!$    else
 !!$       tmask = z(i) < 1._fd+r
