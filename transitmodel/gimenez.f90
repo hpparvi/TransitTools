@@ -36,7 +36,6 @@ contains
 
     !$ if (nt /= 0) call omp_set_num_threads(nt)
 
-!!$    else
 !!$       tmask = z(i) < 1._fd+r
 !!$       nzt   = count(tmask)
 !!$       z_tr = pack(z, tmask)
@@ -47,17 +46,14 @@ contains
 !!$       end do
 !!$       !$omp end parallel do
 !!$       res = unpack(tres, tmask)
-!!$    end if
 
-    else
-       !$omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
-       do i = 1, nz
-          if (z(i) < 1._fd+r) then
-             res(i) = Gimenez_s(z(i), r, nu, u, npol)
-          end if
-       end do
-       !$omp end parallel do
-    end if
+    !$omp parallel do shared(nz, nu, z, r, u, npol, res) private(i) schedule(dynamic)
+    do i = 1, nz
+       if (z(i) < 1._fd+r) then
+          res(i) = Gimenez_s(z(i), r, nu, u, npol)
+       end if
+    end do
+    !$omp end parallel do
 
   contains
     pure real(8) function Gimenez_s(z, r, nu, u, npol)
@@ -84,7 +80,7 @@ contains
          Cn(1) = (1._fd - sum(u)) / (1._fd - sum(n(2:) * u / (n(2:)+2._fd)))
          Cn(2:) = u / (1._fd - n(2:) * u / (n(2:)+2._fd))
       end if
-      
+
       Gimenez_s = 1._fd - sum(a*Cn)
     end function Gimenez_s
 
