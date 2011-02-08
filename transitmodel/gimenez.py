@@ -16,6 +16,7 @@ class Gimenez(TransitModel):
     def __init__(self, method='python', n_threads=0, float_t=np.float32):
         self.float_t = float_t
         self.n_threads = n_threads
+        self.method = method
 
         if method == 'python':
             self.shape   = self._shape_py
@@ -23,13 +24,10 @@ class Gimenez(TransitModel):
             import gimenez_f
             self.shape = gimenez_f.gimenez_f.gimenez
 
-
     def __call__(self, z, r, u=[], npol=100, n_threads=0):
-        s = self.shape(z, r, u, npol, n_threads)
-        return s
+        return self.shape(z, r, u, npol, n_threads)
+
     
-
-
     def _shape_py(self, z, r, u=[], npol=100, n_threads=0):
         """
         Transit light curve model by A. Gimenez (A&A 450, 1231--1237, 2006).

@@ -9,6 +9,8 @@ Date
   13.01.2011
 
 """
+from __future__ import division
+
 import logging
 
 from numpy import pi as PI
@@ -16,6 +18,8 @@ from numpy import double as DOUBLE
 
 TWO_PI  = 2.*PI
 HALF_PI = 0.5*PI
+
+d_to_s = float(24*3600)
 
 logging.basicConfig(filename=None, level=logging.DEBUG,
                     format='%(asctime)s %(levelname)-6s %(message)s',
