@@ -16,14 +16,16 @@ class TransitLightcurve(object):
         self.ldpar = ldpar if ldpar is not None else []
         self.orbit.update(self.parm)
 
-    def __call__(self, time, p=None):
-        if p is not None: self.update(p)
+    def __call__(self, time, p=None, ldp=None):
+        if p is not None: self.update(p, ldp)
         return self.model(self.orbit.projected_distance(time), self.orbit.k, self.ldpar)
 
-    def update(self, p):
+    def update(self, p, ldpar=None):
         self.parm.update(p[:self.parm.npar])
         self.orbit.update(self.parm)
-        #self.ldpar = p[self.parm.npar:]
+
+        if ldpar is not None:
+            self.ldpar = ldpar
         
 
 class TestLightcurve(TransitLightcurve):
