@@ -196,8 +196,7 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     third law, and then the Kipping's transit width parameter using the period and squared impact
     parameter.
     """
-    logging.info('Starting multitransit fitting')
-    logging.info('=============================')
+    info('Starting multitransit fitting',H1)
 
     de_pars = {'npop':50, 'ngen':5, 'C':0.9, 'F':0.25}
     ds_pars = {}
@@ -207,21 +206,22 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
 
     method = kwargs.get('method', 'python')
     sep_ch = kwargs.get('separate_channels', False) 
-    
+    sep_ld = kwargs.get('separate_ld', False)
+
     lcdata    = lcdata if isinstance(lcdata, list) else [lcdata]
     nchannels = len(lcdata)
     totpoints = sum([d.time.size for d in lcdata]) 
 
     ## Generate the fitting parameterization
     ## =====================================
-    p = MTFitParameterization(bounds, stellar_prm, nchannels, separate_k2=sep_ch, separate_ld=True)
+    p = MTFitParameterization(bounds, stellar_prm, nchannels, separate_k2=sep_ch, separate_ld=sep_ld)
 
-    logging.info('  Fitting data with')
-    logging.info('    %6i free parameters'%p.p_cur.size)
-    logging.info('    %6i channels'%nchannels)
-    logging.info('    %6i datapoints'%totpoints)
-    logging.info('    %6i levels of freedom'%(totpoints-p.p_cur.size))
-    logging.info('')
+    info('Fitting data with',I1)
+    info('%6i free parameters'%p.p_cur.size, I2)
+    info('%6i channels'%nchannels, I2)
+    info('%6i datapoints'%totpoints, I2)
+    info(' %6i levels of freedom'%(totpoints-p.p_cur.size), I2)
+    info('')
 
     ## Setup the fitting lightcurve
     ## ============================
@@ -230,21 +230,16 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
 
     ## Define the minimization function.
     ## =================================
-    ## We use the normal Chi squared for convenience. Since we assume a constant 
-    ## point-to-point scatter for the whole lightcurve, we can take the division 
-    ## by the variance outside the sum.
-    ##
     times  = [t.get_time() for t in lcdata]
     fluxes = [t.get_flux() for t in lcdata]
     ivars  = [t.ivar       for t in lcdata]
-    norms  = [1/(len(lcdata)*f.size) for f in fluxes]
 
     p_geom = zeros(5)
     def minfun(p_fit):
         p.update(p_fit)
         if p.is_inside_limits():
             chi = 0.
-            for chn, (time,flux,ivar,norm) in enumerate(zip(times,fluxes,ivars,norms)):
+            for chn, (time,flux,ivar) in enumerate(zip(times,fluxes,ivars)):
                 chi += ((flux - lc(time, p.get_kipping(chn), p.get_ldc(chn)))**2 * ivar).sum()
             return chi
         else:
@@ -257,39 +252,46 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
 
     ## Local fitting using downhill simplex 
     ## ====================================
-    r_fn = fmin(minfun, r_de.get_fit(), full_output=1, **ds_pars)
+    r_fn    = fmin(minfun, r_de.get_fit(), full_output=1, **ds_pars)
+
+    f_de    = r_de.get_fit()
+    f_fn    = r_fn[0]
+    chi_fn  = r_fn[1]
 
     ## Map the fits represented in Kipping parameterization to physical parameterization
     ## =================================================================================
-    p_de   = TransitParameterization('physical', p.get_physical(0, r_de.get_fit()))
-    p_fn   = TransitParameterization('physical', p.get_physical(0, r_fn[0]))
+    p_de   = TransitParameterization('physical', p.get_physical(0, f_de))
+    p_fn   = TransitParameterization('physical', p.get_physical(0, f_fn))
 
     ## Update the multitransit lightcurve with the new transit solution
     ## ================================================================
-    lc.update(p.get_physical(0, r_fn[0]), p.get_ldc(0))
-
-    chi_sqr = r_fn[1]
+    lc.update(p.get_physical(0, f_fn), p.get_ldc(0))
 
     for d in lcdata:
-        d.fit = {'parameterization':p_fn, 'ldc':p.get_ldc(0, r_fn[0])}
+        d.fit = {'parameterization':p_fn, 'ldc':p.get_ldc(0, f_fn)}
         d.tc = p_fn[1]
         d.p = p_fn[2]
 
-    logging.info("%15s %15s"%("DiffEvol" ,"FMin"))
-
-    for chn in range(nchannels):
-        logging.info("%15.5f %15.5f  -  radius ratio"%(p.get_physical(chn, r_de.get_fit())[0],
-                                                       p.get_physical(chn, r_fn[0])[0]))
+    ## Print parameters and statistics
+    ## ===============================
+    info('Best-fit parameters',H2)
+    info("%14s %14s"%("DiffEvol" ,"FMin"),I1)
+    nc = nchannels if sep_ch else 1 
+    for chn in range(nc):
+        info("%14.5f %14.5f  -  radius ratio"%(p.get_physical(chn, f_de)[0],
+                                               p.get_physical(chn, f_fn)[0]), I1)
     for i,k in enumerate(parameterizations['physical'][1:]):
-        logging.info("%15.5f %15.5f  -  %s" %(p_de[i+1], p_fn[i+1], parameters[k].description))
+        info("%14.5f %14.5f  -  %s" %(p_de[i+1], p_fn[i+1], parameters[k].description), I1)
+    nc = nchannels if sep_ld else 1 
+    for chn in range(nc):
+        info("%14.5f %14.5f  -  limb darkening"%(p.get_ldc(chn, f_de)[0], p.get_ldc(chn, f_fn)[0]), I1)
 
-    for chn in range(nchannels):
-        logging.info("%15.5f %15.5f  -  limb darkening"%(p.get_ldc(chn, r_de.get_fit())[0], p.get_ldc(chn, r_fn[0])[0]))
-
-
-    logging.info('')
-    logging.info("Akaike's information criterion %10.2f" %(chi_sqr + 2*p.p_cur.size))
-    logging.info('')
+    info('Fit statistics',H2)
+    info('Differential evolution minimum %10.2f'%r_de.get_chi(),I1)
+    info('Downhill simplex minimum       %10.2f'%chi_fn,I1)
+    info('')
+    info("Akaike's information criterion %10.2f" %(chi_fn + 2*p.p_cur.size), I1)
+    info('')
 
 #    import pylab as pl
 #    lc = TransitLightcurve(TransitParameterization("kipping", p.p_k_min),

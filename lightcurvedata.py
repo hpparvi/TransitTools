@@ -268,10 +268,10 @@ class MultiTransitLC(object):
         logging.info('  Median std %7.5f'%np.median(self.std))
         logging.info('')
 
-        self.plot()
-        pl.show()
+        #self.plot()
+        #pl.show()
         #exit()
-        exit()
+        #exit()
 
 
     def remove_bad_transits(self, sigma=5.):

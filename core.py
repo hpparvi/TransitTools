@@ -53,9 +53,11 @@ I3 = 4
 
 def info(msg, style=10):
     if style == H1:
+        logging.info('')
         logging.info(msg)
         logging.info(len(msg)*"=")
     elif style == H2:
+        logging.info('')
         logging.info(msg)
         logging.info(len(msg)*"-")
     elif style == I1:
