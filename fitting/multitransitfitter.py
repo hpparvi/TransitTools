@@ -18,7 +18,7 @@ from cPickle import dump, load
 
 import pylab as pl
 
-from numpy import abs, array, zeros, concatenate
+from numpy import abs, array, zeros, concatenate, any, tile, hstack, vstack, repeat, linspace
 from scipy.optimize import fmin
 from math import acos, cos, sin, asin, sqrt
 from sys import exit
@@ -81,6 +81,109 @@ def load_MTFitResult(filename):
     return res
 
     
+
+class MTFitParameterization(object):
+    def __init__(self, bnds, stellar_prm, nch, **kwargs):
+        logging.info('Initializing fitting parameterization')
+        logging.info('-------------------------------------')
+        self.nch = nch
+        self.separate_k2 = kwargs.get('separate_k2', False)
+        self.separate_ld = kwargs.get('separate_ld', False)
+
+        logging.info('  Fitting %i channels' %nch)
+        logging.info('    Separate transit depths per channel: %s' %self.separate_k2)
+        logging.info('    Separate limb darkening coefficients per channel: %s' %self.separate_ld)
+
+        self.n_k2  = nch if self.separate_k2 else 1
+        self.n_lds = nch if self.separate_ld else 1
+        self.n_ldc = len(bnds['ld'][0])
+
+        ## [k2_ch0 k2_ch1 ... k2_chn tc p b2 ld1 ld2 ... ldn]
+        ##
+        self.id_k2 = self.nch*[0] if not self.separate_k2 else range(self.nch)
+        self.id_tc = self.n_k2
+        self.id_p  = self.n_k2 + 1
+        self.id_b2 = self.n_k2 + 2
+        self.id_ld = self.n_k2 + 3
+
+        if self.separate_ld:
+            self.id_ldc = [[self.id_ld+self.n_ldc*i, self.id_ld+self.n_ldc*(i+1)] for i in range(self.nch)]
+        else:
+            self.id_ldc = self.nch*[[self.id_ld, self.id_ld+self.n_ldc]]
+        
+        self.ac = ((G*stellar_prm['M']/TWO_PI**2)**(1/3)) / stellar_prm['R']
+
+        ## Generate mappings
+        ## =================
+        self.map_p_to_k = generate_mapping("physical","kipping")
+        self.map_k_to_p = generate_mapping("kipping","physical")
+
+        ## Define differential evolution parameter boundaries
+        ## ==================================================
+        ## The boundaries are given as a dictionary with physical parameter boundaries. These are
+        ## mapped to the Kipping parameterization with the relative semi-major axis set to unity.
+        ##
+        self.p_k_min  = self.map_p_to_k([bnds['k'][0], bnds['tc'][0], bnds['p'][0], 10, bnds['b'][0]])
+        self.p_k_max  = self.map_p_to_k([bnds['k'][1], bnds['tc'][1], bnds['p'][1], 10, bnds['b'][1]])
+        ##
+        ## The final fitting parameter boundaries are obtained by excluding the transit width parameter
+        ## from the fitting parameter set and adding the limb darkening parameters.
+        ##
+        self.p_min = concatenate([repeat(self.p_k_min[0], self.n_k2),
+                                  self.p_k_min[[1,2,4]],
+                                  tile(bnds['ld'][0], self.n_lds)])
+
+        self.p_max = concatenate([repeat(self.p_k_max[0], self.n_k2),
+                                  self.p_k_max[[1,2,4]],
+                                  tile(bnds['ld'][1], self.n_lds)])
+
+        self.p_cur = vstack([self.p_min, self.p_max]).mean(0)
+
+        ## Setup hard parameter limits 
+        ## ===========================
+        self.l_min = concatenate([repeat(0.0, self.n_k2),
+                                 repeat(0.0, 3),
+                                 repeat(-2.0, self.n_lds*self.n_ldc)])
+
+        self.l_max = concatenate([repeat(0.3**2, self.n_k2),
+                                 array([1e18, 1e5, 0.95]),
+                                 repeat(2.0, self.n_lds*self.n_ldc)])
+
+        logging.info('  Total length of the parameter vector: %i' %self.p_cur.size)
+        logging.info('')
+
+    def update(self, pv):
+        self.p_cur = pv
+
+    def is_inside_limits(self):
+        if any(self.p_cur < self.l_min) or any(self.p_cur > self.l_max):
+            return False
+        else:
+            return True
+
+    def kipping_i(self, period, b2):
+        ## Obtain the Kipping's transit width parameter and the semi-major axis using Kepler's third law
+        ## =============================================================================================
+        a = self.ac * (d_to_s*period)**(2/3)
+        it = TWO_PI/period/asin(sqrt(1-b2)/(a*sin(acos(sqrt(b2)/a))))
+        return it
+
+    def get_physical(self, ch=0, p_in=None):
+        return self.map_k_to_p(self.get_kipping(ch, p_in))
+
+    def get_kipping(self, ch=0, p_in=None, p_out=None):
+        if p_in is not None: self.update(p_in)
+        if p_out is None: p_out = zeros(5)
+        p_out[0] = self.p_cur[self.id_k2[ch]]
+        p_out[[1,2,4]] = self.p_cur[self.id_tc:self.id_b2+1]
+        p_out[3] = self.kipping_i(self.p_cur[self.id_p], self.p_cur[self.id_b2])
+        return p_out
+
+    def get_ldc(self, ch=0, p_in=None):
+        if p_in is not None: self.update(p_in)
+        return self.p_cur[self.id_ldc[ch][0] : self.id_ldc[ch][1]]
+
+
 def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     """Fits a transit model to a lightcurve using both global and local optimization.
 
@@ -93,18 +196,19 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     third law, and then the Kipping's transit width parameter using the period and squared impact
     parameter.
     """
+    logging.info('Starting multitransit fitting')
+    logging.info('=============================')
 
     lcdata = lcdata if isinstance(lcdata, list) else [lcdata]
-
-    nchannels = len(lcdata)
-
+    
     totpoints = 0
     for d in lcdata:
         totpoints += d.time.size
 
-    logging.info("Using %i points for fitting." %totpoints)
+    method = kwargs.get('method', 'python')
+    sep_ch = kwargs.get('separate_channels', False) 
 
-    method = 'python' if 'method' not in kwargs.keys() else kwargs['method'] 
+    nchannels = len(lcdata)
 
     de_pars = {'npop':50, 'ngen':5, 'C':0.9, 'F':0.25}
     ds_pars = {}
@@ -112,46 +216,20 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     if 'de_pars' in kwargs.keys(): de_pars.update(kwargs['de_pars'])
     if 'ds_pars' in kwargs.keys(): ds_pars.update(kwargs['ds_pars'])
 
-    ## Generate mappings
-    ## =================
-    map_p_to_k = generate_mapping("physical","kipping")
-    map_k_to_p = generate_mapping("kipping","physical")
+    p = MTFitParameterization(bounds, stellar_prm, nchannels, separate_k2=sep_ch, separate_ld=True)
 
-    ## Define differential evolution parameter boundaries
-    ## ==================================================
-    ## The boundaries are given as a dictionary with physical parameter boundaries. These are
-    ## mapped to the Kipping parameterization with the relative semi-major axis set to unity.
-    ##
-    p_k_min  = map_p_to_k([bounds['k'][0], bounds['tc'][0], bounds['p'][0], 10, bounds['b'][0]])
-    p_k_max  = map_p_to_k([bounds['k'][1], bounds['tc'][1], bounds['p'][1], 10, bounds['b'][1]])
-    ##
-    ## The final fitting parameter boundaries are obtained by excluding the transit width parameter
-    ## from the fitting parameter set and adding the limb darkening parameters.
-    ##
-    n_ldc = len(bounds['ld'][0])
-    p_min = concatenate([p_k_min[[0,1,2,4]],bounds['ld'][0]])
-    p_max = concatenate([p_k_max[[0,1,2,4]],bounds['ld'][1]])
+    logging.info('  Fitting data with')
+    logging.info('    %6i free parameters'%p.p_cur.size)
+    logging.info('    %6i channels'%nchannels)
+    logging.info('    %6i datapoints'%totpoints)
+    logging.info('    %6i levels of freedom'%(totpoints-p.p_cur.size))
+    logging.info('')
+
 
     ## Setup the fitting lightcurve
     ## ============================
-    lc = TransitLightcurve(TransitParameterization("kipping", p_k_min), method=method, ldpar=bounds['ld'][0])
-
-    ## Obtain the Kipping's transit width parameter and the semi-major axis using Kepler's third law
-    ## =============================================================================================
-    ac = ((G*stellar_prm['M']/TWO_PI**2)**(1/3)) / stellar_prm['R']
-    def kipping_i(period, b2):
-        a = ac * (d_to_s*period)**(2/3)
-        it = TWO_PI/period/asin(sqrt(1-b2)/(a*sin(acos(sqrt(b2)/a))))
-        return it
-
-    ## The parameterization used in fitting differs from the normal Kipping parameterization,
-    ## thus we need to translate between the fitting and Kipping parameterizations.
-    ##
-    def fitting_to_kipping(p_in, p_out=None):
-        if p_out is None: p_out = zeros(5)
-        p_out[[0,1,2,4]] = p_in[:-n_ldc]
-        p_out[3] = kipping_i(p_in[2], p_in[3])
-        return p_out
+    lc = TransitLightcurve(TransitParameterization("kipping", p.p_k_min),
+                           method=method, ldpar=bounds['ld'][0])
 
     ## Define the minimization function.
     ## =================================
@@ -159,29 +237,25 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     ## point-to-point scatter for the whole lightcurve, we can take the division 
     ## by the variance outside the sum.
     ##
-
     times  = [t.get_time() for t in lcdata]
     fluxes = [t.get_flux() for t in lcdata]
-    ivars  = [t.ivar for t in lcdata]
+    ivars  = [t.ivar       for t in lcdata]
     norms  = [1/(len(lcdata)*f.size) for f in fluxes]
 
     p_geom = zeros(5)
     def minfun(p_fit):
-        if p_fit[0] < 0: return 1e18
-        if p_fit[-n_ldc-1] < 0 or p_fit[-n_ldc-1] > 1: return 1e18
-        if p_fit[-n_ldc] < 0 or p_fit[-n_ldc] > 1: return 1e18
-
-        fitting_to_kipping(p_fit, p_geom)
-
-        chi = 0.
-        for time,flux,ivar,norm in zip(times,fluxes,ivars,norms):
-            chi += ((flux - lc(time, p_geom, p_fit[-n_ldc:]))**2 * ivar).sum() * norm
-
-        return chi
+        p.update(p_fit)
+        if p.is_inside_limits():
+            chi = 0.
+            for chn, (time,flux,ivar,norm) in enumerate(zip(times,fluxes,ivars,norms)):
+                chi += ((flux - lc(time, p.get_kipping(chn), p.get_ldc(chn)))**2 * ivar).sum()
+            return chi
+        else:
+            return 1e18
 
     ## Global fitting using differential evolution
     ## ============================================
-    fitter_g = DiffEvol(minfun, array([p_min,p_max]).transpose(), **de_pars)
+    fitter_g = DiffEvol(minfun, array([p.p_min,p.p_max]).transpose(), **de_pars)
     r_de = fitter_g()
 
     ## Local fitting using downhill simplex 
@@ -190,21 +264,43 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
 
     ## Map the fits represented in Kipping parameterization to physical parameterization
     ## =================================================================================
-    p_de   = TransitParameterization('physical', map_k_to_p(fitting_to_kipping(r_de.get_fit())))
-    p_fn   = TransitParameterization('physical', map_k_to_p(fitting_to_kipping(r_fn[0])))
+    p_de   = TransitParameterization('physical', p.get_physical(0, r_de.get_fit()))
+    p_fn   = TransitParameterization('physical', p.get_physical(0, r_fn[0]))
 
     ## Update the multitransit lightcurve with the new transit solution
     ## ================================================================
-    lc.update(fitting_to_kipping(r_fn[0]), r_fn[0][-n_ldc:])
+    lc.update(p.get_physical(0, r_fn[0]), p.get_ldc(0))
+
+    chi_sqr = r_fn[1]
 
     for d in lcdata:
-        d.fit = {'parameterization':p_fn, 'ldc':r_fn[0][-n_ldc:]}
+        d.fit = {'parameterization':p_fn, 'ldc':p.get_ldc(0, r_fn[0])}
         d.tc = p_fn[1]
         d.p = p_fn[2]
 
     logging.info("%15s %15s"%("DiffEvol" ,"FMin"))
-    for i,k in enumerate(parameterizations['physical']):
-        logging.info("%15.5f %15.5f  -  %s" %(p_de[i], p_fn[i], parameters[k].description))
-    logging.info("%15.5f %15.5f  -  Limb darkening"%(r_de.get_fit()[-1], r_fn[0][-1]))
+
+    for chn in range(nchannels):
+        logging.info("%15.5f %15.5f  -  radius ratio"%(p.get_physical(chn, r_de.get_fit())[0],
+                                                       p.get_physical(chn, r_fn[0])[0]))
+    for i,k in enumerate(parameterizations['physical'][1:]):
+        logging.info("%15.5f %15.5f  -  %s" %(p_de[i+1], p_fn[i+1], parameters[k].description))
+
+    for chn in range(nchannels):
+        logging.info("%15.5f %15.5f  -  limb darkening"%(p.get_ldc(chn, r_de.get_fit())[0], p.get_ldc(chn, r_fn[0])[0]))
+
+
+    logging.info('')
+    logging.info("Akaike's information criterion %10.2f" %(chi_sqr + 2*p.p_cur.size))
+    logging.info('')
+
+#    import pylab as pl
+#    lc = TransitLightcurve(TransitParameterization("kipping", p.p_k_min),
+#                           method=method, mode='phase', ldpar=bounds['ld'][0])
+#    ph = TWO_PI*linspace(-0.03,0.03,500)
+#    for chn in range(nchannels):
+#        pl.plot(ph, lc(ph, p.get_kipping(chn, r_fn[0]), p.get_ldc(chn, r_fn[0])))
+#    pl.show()
+#    exit()
 
     return MTFitResult(r_fn, p_fn, r_de, p_de, lcdata, lc)

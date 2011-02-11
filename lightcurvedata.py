@@ -20,32 +20,56 @@ class SingleTransit(object):
         self.periodic_signal = None
         self.periodic_sig_p  = None
         self.zeropoint = None
-        self.std = None # Out of transit std
+        self.std = None 
+
+        self.zeropoint = self.flux[self.tmask].mean()
+
+    def get_std(self, clean=True):
+        t,f = self.get_transit(mask_transit=True, cleaned=clean, normalize=True)
+        return f.std()
+
+
+    def get_flux(self, mask_transit=False, clean=None, normalize=False):
+        """Returns the observed flux.
+
+           Returns the observed flux datapoints.
+
+           Options
+             mask_transit  bool  
+                           Should the transit be masked away.
+
+             clean         bool or ['continuum','periodic'] 
+                           Should the cleaning steps be applied.
+
+             normalize     bool
+                           Should the data be normalized.
+
+        """
+        flux = self.flux.copy()
+        if clean is not None:
+            stages = np.zeros(2, np.bool)
+            if isinstance(clean,bool) and clean:
+                stages[:] = True
+            else:
+                stages[0] = 'continuum' in clean
+                stages[1] = 'periodic'  in clean
+
+            if stages[0] and self.continuum_fit is not None:
+                flux -= self.continuum_fit(self.time - self.t_center)
+            if stages[1] and self.periodic_signal is not None:
+                flux -= self.periodic_signal(self.time % self.periodic_sig_p)
+        if normalize: flux /= self.zeropoint
+        return flux if not mask_transit else flux[self.tmask]
+
+    
+    def get_time(self, mask_transit=False):
+        return self.time.copy() if not mask_transit else self.time[self.tmask].copy()
 
 
     def get_transit(self, time=True, mask_transit=False, cleaned=None, normalize=False):
-        xdata = self.time if time else np.arange(self.g_range[0], self.g_range[1])
-
-        ydata = self.flux.copy()
-        if cleaned is not None:
-            stages = np.zeros(2, np.bool)
-            if isinstance(cleaned,bool) and cleaned:
-                stages[:] = True
-            else:
-                stages[0] = 'continuum' in cleaned
-                stages[1] = 'periodic'  in cleaned
-
-            if stages[0] and self.continuum_fit is not None:
-                ydata -= self.continuum_fit(self.time - self.t_center)
-            if stages[1] and self.periodic_signal is not None:
-                ydata -= self.periodic_signal(self.time % self.periodic_sig_p)
-
-            if normalize: ydata /= self.zeropoint
-
-        if not mask_transit:
-            return xdata.copy(), ydata
-        else:
-            return xdata[self.tmask].copy(), ydata[self.tmask]
+        tdata = self.get_time(mask_transit) if time else np.arange(self.g_range[0], self.g_range[1])
+        fdata = self.get_flux(mask_transit, cleaned, normalize)
+        return tdata, fdata
 
 
     def fit_continuum(self, n_iter=15, top=5.0, bottom=15.0):
@@ -61,7 +85,7 @@ class SingleTransit(object):
             bm = np.logical_and(bm, crf > - bottom * self.std)
 
         self.zeropoint = fit(t).mean()
-        self.ivar[:] = 1./(self.std/self.zeropoint)**2
+        self.ivar[:] = 1./self.get_std()**2
         self.continuum_fit = fit
         self.badpx_mask[:] = bm
 
@@ -80,6 +104,8 @@ class SingleTransit(object):
 
         self.periodic_sig_p  = period
         self.periodic_signal = s
+
+        self.ivar[:] = 1./self.get_std()**2
 
         #if self.number == 45: self.plot_periodic_signal()
 
@@ -139,15 +165,14 @@ class SingleTransit(object):
         pl.subplots_adjust(right=0.98, top=0.98, left=0.08, wspace=0.05, hspace=0.05)
 
         pl.show()
-        #exit()
         
 
 
 class MultiTransitLC(object):
     def __init__(self, time, flux, tc, p, s, t_width=0.1, mtime=True, **kwargs):
-
+        logging.info('Initializing the lightcurve data')
+        logging.info('--------------------------------')
         ## TODO: Store the removed points in a separate array
-
         otime = np.abs(((time-tc+0.5*p)%p) - 0.5*p)
         phase = np.abs(((time-tc+0.5*p)%p) / p - 0.5)
         mask = otime < s if mtime else phase < s
@@ -175,48 +200,69 @@ class MultiTransitLC(object):
         self.t_number = np.round(self.t_number-self.t_number[0]).astype(np.int)
         self.n_transits = self.t_number[-1] + 1
 
+        ## Separate transits
+        ## =================
+        ## Separate the lightcurve into transit-centered pieces of given width,
+        ## each transit represented by a SingleTransit class.
+        logging.info('  Separating transits')
         t = np.arange(self.time.size)
         for i in range(self.n_transits):
             b = self.t_number == i
+            ## First check if we have any points corresponding the given transit
+            ## number.
             if np.any(b):
                 r1 = t[b][0]; r2 = t[b][-1]+1
-
-                ## Check if we actually have any in-transit points for the transits,
-                ## reject the transit if not.
+                ## Next check if we actually have any in-transit points for the 
+                ## transits, reject the transit if not.
                 if np.any(~self.tmask[r1:r2]):
-                    self.transits.append(SingleTransit(self.time[r1:r2], self.flux[r1:r2], self.ivar[r1:r2],
-                                                       self.tmask[r1:r2], self.badpx_mask[r1:r2],
+                    self.transits.append(SingleTransit(self.time[r1:r2],
+                                                       self.flux[r1:r2],
+                                                       self.ivar[r1:r2],
+                                                       self.tmask[r1:r2],
+                                                       self.badpx_mask[r1:r2],
                                                        i, self.tc+i*self.p, [r1,r2]))
                 else:
                     self.n_transits -= 1
             else:
                 self.n_transits -= 1
+        logging.info('    Found %i good transits'%self.n_transits)
 
+        for tr in self.transits:
+            tr.ivar[:] = 1./tr.get_std()**2
+
+        logging.info('  Cleaning the transit data')
+        logging.info('    Fitting per-transit continuum level')
         for t in self.transits:
             t.fit_continuum(**clean_pars)
 
+        logging.info('    Removing bad points')
         self.clean(self.badpx_mask)
 
         if 'ps_period' in kwargs.keys():
-            logging.info('Cleaning up a periodic error signal.')
+            logging.info('    Cleaning a periodic error signal')
             for t in self.transits:
                 t.fit_periodic_signal(kwargs['ps_period'])
 
+        #logging.debug('  Per-transit std')
         std = []
-        for t in self.transits:
-            std.append(t.std/t.zeropoint)
+        for tr in self.transits:
+            std.append(tr.get_std())
+            #logging.debug('    raw  %3i %8.5f'%(tr.number, tr.get_std(None)))
+            #logging.debug('    cont %3i %8.5f'%(tr.number, tr.get_std(['continuum'])))
+            #logging.debug('    pers %3i %8.5f'%(tr.number, tr.get_std(True)))
+            #logging.debug('')
+
 
         self.std = np.array(std)
 
-        #t = np.linspace(0, kwargs['ps_period'],2000) % kwargs['ps_period']
+        logging.info('  Created a lightcurve with %i points'%self.time.size)
+        logging.info('  Mean   std %10.8f'%self.get_mean_std())
+        logging.info('  Median std %10.8f'%np.median(self.std))
 
-        #for i in range(3):
-        #    pl.plot(self.transits[25+i].periodic_signal(t))
-
-        #pl.plot(self.get_flux())
+        logging.info('')
+        #self.plot()
         #pl.show()
         #exit()
-
 
     def get_mean_std(self):
         return self.std.mean()
