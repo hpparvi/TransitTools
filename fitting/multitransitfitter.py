@@ -199,23 +199,21 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     logging.info('Starting multitransit fitting')
     logging.info('=============================')
 
-    lcdata = lcdata if isinstance(lcdata, list) else [lcdata]
-    
-    totpoints = 0
-    for d in lcdata:
-        totpoints += d.time.size
-
-    method = kwargs.get('method', 'python')
-    sep_ch = kwargs.get('separate_channels', False) 
-
-    nchannels = len(lcdata)
-
     de_pars = {'npop':50, 'ngen':5, 'C':0.9, 'F':0.25}
     ds_pars = {}
 
-    if 'de_pars' in kwargs.keys(): de_pars.update(kwargs['de_pars'])
-    if 'ds_pars' in kwargs.keys(): ds_pars.update(kwargs['ds_pars'])
+    de_pars.update(kwargs.get('de_pars',{}))
+    ds_pars.update(kwargs.get('ds_pars',{}))
 
+    method = kwargs.get('method', 'python')
+    sep_ch = kwargs.get('separate_channels', False) 
+    
+    lcdata    = lcdata if isinstance(lcdata, list) else [lcdata]
+    nchannels = len(lcdata)
+    totpoints = sum([d.time.size for d in lcdata]) 
+
+    ## Generate the fitting parameterization
+    ## =====================================
     p = MTFitParameterization(bounds, stellar_prm, nchannels, separate_k2=sep_ch, separate_ld=True)
 
     logging.info('  Fitting data with')
@@ -224,7 +222,6 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     logging.info('    %6i datapoints'%totpoints)
     logging.info('    %6i levels of freedom'%(totpoints-p.p_cur.size))
     logging.info('')
-
 
     ## Setup the fitting lightcurve
     ## ============================
