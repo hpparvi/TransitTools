@@ -293,6 +293,10 @@ class MultiTransitLC(object):
         return self.std.mean()
 
 
+    def get_transit_slices(self):
+        return [tr.g_range_s for tr in self.transits]
+
+
     def update_stds(self):
         std = []
         for tr in self.transits:

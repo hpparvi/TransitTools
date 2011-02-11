@@ -18,7 +18,7 @@ from cPickle import dump, load
 
 import pylab as pl
 
-from numpy import abs, array, zeros, concatenate, any, tile, hstack, vstack, repeat, linspace
+from numpy import abs, array, zeros, concatenate, any, tile, hstack, vstack, repeat, linspace, arange
 from scipy.optimize import fmin
 from math import acos, cos, sin, asin, sqrt
 from sys import exit
@@ -40,12 +40,12 @@ from transitLightCurve.lightcurvedata import MultiTransitLC
 
 class MTFitResult(FitResult):
     def __init__(self, res_ds, prm_ds, res_de, prm_de, obsdata, lc):
-        self.res_ds  = res_ds[0]
+        self.res_ds  = res_ds[0] if res_ds is not None else None
         self.res_de  = res_de
         self.obsdata = obsdata
 
         self.ds_prm  = prm_ds
-        self.ds_ldc  = res_ds[0][-1:]
+        self.ds_ldc  = res_ds[0][-1:] if res_ds is not None else None
 
         self.de_prm  = prm_de
         self.de_ldc  = res_de.get_fit()[-1:]
@@ -83,24 +83,40 @@ def load_MTFitResult(filename):
     
 
 class MTFitParameterization(object):
-    def __init__(self, bnds, stellar_prm, nch, **kwargs):
-        logging.info('Initializing fitting parameterization')
-        logging.info('-------------------------------------')
+    def __init__(self, bnds, stellar_prm, nch, ntr, **kwargs):
+        info('Initializing fitting parameterization', H2)
+
         self.nch = nch
-        self.separate_k2 = kwargs.get('separate_k2', False)
-        self.separate_ld = kwargs.get('separate_ld', False)
+        self.separate_k2_tr = kwargs.get('depth_per_transit', False)
+        self.separate_k2_ch = kwargs.get('depth_per_channel', False)
+        self.separate_ld    = kwargs.get('separate_ld', False)
 
-        logging.info('  Fitting %i channels' %nch)
-        logging.info('    Separate transit depths per channel: %s' %self.separate_k2)
-        logging.info('    Separate limb darkening coefficients per channel: %s' %self.separate_ld)
+        info('Separate transit depths per transit: %s' %self.separate_k2_tr, I1)
+        info('Separate transit depths per channel: %s' %self.separate_k2_ch, I1)
+        info('Separate limb darkening per channel: %s' %self.separate_ld, I1)
 
-        self.n_k2  = nch if self.separate_k2 else 1
+        self.n_k2  = nch if self.separate_k2_ch else 1
+        self.n_k2 *= ntr if self.separate_k2_tr else 1
         self.n_lds = nch if self.separate_ld else 1
         self.n_ldc = len(bnds['ld'][0])
 
-        ## [k2_ch0 k2_ch1 ... k2_chn tc p b2 ld1 ld2 ... ldn]
+        ## Transit depths (k2) make up the first part of the parameter vector.
+        ## Since we can fit a single depth to all the channels and transits, or
+        ## a separate depth per channel and/or transit, the indexing needs
+        ## a bit more work than the rest of the parameters. 
         ##
-        self.id_k2 = self.nch*[0] if not self.separate_k2 else range(self.nch)
+        ## [k2_ch0_tr0 k2_ch0_tr1 ... k2_chn_trn tc p b2 ld1 ld2 ... ldn]
+        ##
+        if not self.separate_k2_tr and not self.separate_k2_ch:
+            self.id_k2 = zeros([nch, ntr])
+        else:
+            if self.separate_k2_tr and not self.separate_k2_ch:
+                self.id_k2 = tile(arange(ntr),nch).reshape([nch,ntr])
+            elif self.separate_k2_ch and not self.separate_k2_tr:
+                self.id_k2 = repeat(arange(nch),ntr).reshape([nch,ntr])
+            else:
+                self.id_k2 = arange(nch*ntr).reshape([nch,ntr])
+
         self.id_tc = self.n_k2
         self.id_p  = self.n_k2 + 1
         self.id_b2 = self.n_k2 + 2
@@ -168,13 +184,13 @@ class MTFitParameterization(object):
         it = TWO_PI/period/asin(sqrt(1-b2)/(a*sin(acos(sqrt(b2)/a))))
         return it
 
-    def get_physical(self, ch=0, p_in=None):
-        return self.map_k_to_p(self.get_kipping(ch, p_in))
+    def get_physical(self, ch=0, tn=0, p_in=None):
+        return self.map_k_to_p(self.get_kipping(ch, tn, p_in))
 
-    def get_kipping(self, ch=0, p_in=None, p_out=None):
+    def get_kipping(self, ch=0, tn=0, p_in=None, p_out=None):
         if p_in is not None: self.update(p_in)
         if p_out is None: p_out = zeros(5)
-        p_out[0] = self.p_cur[self.id_k2[ch]]
+        p_out[0] = self.p_cur[self.id_k2[ch, tn]]
         p_out[[1,2,4]] = self.p_cur[self.id_tc:self.id_b2+1]
         p_out[3] = self.kipping_i(self.p_cur[self.id_p], self.p_cur[self.id_b2])
         return p_out
@@ -204,9 +220,11 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     de_pars.update(kwargs.get('de_pars',{}))
     ds_pars.update(kwargs.get('ds_pars',{}))
 
+    do_local_fit = kwargs.get('do_local_fit', True)
     method = kwargs.get('method', 'python')
     sep_ch = kwargs.get('separate_channels', False) 
     sep_ld = kwargs.get('separate_ld', False)
+    depth_per_transit =  kwargs.get('depth_per_transit', False)
 
     lcdata    = lcdata if isinstance(lcdata, list) else [lcdata]
     nchannels = len(lcdata)
@@ -214,13 +232,17 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
 
     ## Generate the fitting parameterization
     ## =====================================
-    p = MTFitParameterization(bounds, stellar_prm, nchannels, separate_k2=sep_ch, separate_ld=sep_ld)
+    p = MTFitParameterization(bounds, stellar_prm, nchannels, lcdata[0].n_transits,
+                              depth_per_channel=sep_ch,
+                              depth_per_transit=depth_per_transit,
+                              separate_ld=sep_ld)
+    ##FIXME: Having different number of transits for each channels breaks things up.
 
     info('Fitting data with',I1)
     info('%6i free parameters'%p.p_cur.size, I2)
     info('%6i channels'%nchannels, I2)
     info('%6i datapoints'%totpoints, I2)
-    info(' %6i levels of freedom'%(totpoints-p.p_cur.size), I2)
+    info('%6i levels of freedom'%(totpoints-p.p_cur.size), I2)
     info('')
 
     ## Setup the fitting lightcurve
@@ -228,14 +250,26 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     lc = TransitLightcurve(TransitParameterization("kipping", p.p_k_min),
                            method=method, ldpar=bounds['ld'][0])
 
-    ## Define the minimization function.
-    ## =================================
+    ## Define the minimization function
+    ## ================================
     times  = [t.get_time() for t in lcdata]
     fluxes = [t.get_flux() for t in lcdata]
     ivars  = [t.ivar       for t in lcdata]
-
+    slices = [t.get_transit_slices() for t in lcdata]
     p_geom = zeros(5)
-    def minfun(p_fit):
+
+    def minfun_per_transit(p_fit):
+        p.update(p_fit)
+        if p.is_inside_limits():
+            chi = 0.
+            for chn, (time,flux,ivar,sls) in enumerate(zip(times,fluxes,ivars,slices)):
+                for trn, sl in enumerate(sls):
+                    chi += ((flux[sl] - lc(time[sl], p.get_kipping(chn, trn), p.get_ldc(chn)))**2 * ivar[sl]).sum()
+                return chi
+        else:
+            return 1e18
+
+    def minfun_basic(p_fit):
         p.update(p_fit)
         if p.is_inside_limits():
             chi = 0.
@@ -245,27 +279,33 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
         else:
             return 1e18
 
+    minfun = minfun_per_transit if depth_per_transit else minfun_basic
+
     ## Global fitting using differential evolution
     ## ============================================
     fitter_g = DiffEvol(minfun, array([p.p_min,p.p_max]).transpose(), **de_pars)
     r_de = fitter_g()
+    f_de    = r_de.get_fit()
+    chi_de  = r_de.get_chi()
+    r_fn    = None 
+    f_fn    = f_de
+    chi_fn  = chi_de
 
     ## Local fitting using downhill simplex 
     ## ====================================
-    r_fn    = fmin(minfun, r_de.get_fit(), full_output=1, **ds_pars)
-
-    f_de    = r_de.get_fit()
-    f_fn    = r_fn[0]
-    chi_fn  = r_fn[1]
+    if do_local_fit:
+        r_fn    = fmin(minfun, r_de.get_fit(), full_output=1, **ds_pars)
+        f_fn    = r_fn[0]
+        chi_fn  = r_fn[1]
 
     ## Map the fits represented in Kipping parameterization to physical parameterization
     ## =================================================================================
-    p_de   = TransitParameterization('physical', p.get_physical(0, f_de))
-    p_fn   = TransitParameterization('physical', p.get_physical(0, f_fn))
+    p_de   = TransitParameterization('physical', p.get_physical(0, 0, f_de))
+    p_fn   = TransitParameterization('physical', p.get_physical(0, 0, f_fn))
 
     ## Update the multitransit lightcurve with the new transit solution
     ## ================================================================
-    lc.update(p.get_physical(0, f_fn), p.get_ldc(0))
+    lc.update(p.get_physical(0, 0, f_fn), p.get_ldc(0))
 
     for d in lcdata:
         d.fit = {'parameterization':p_fn, 'ldc':p.get_ldc(0, f_fn)}
@@ -277,9 +317,11 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     info('Best-fit parameters',H2)
     info("%14s %14s"%("DiffEvol" ,"FMin"),I1)
     nc = nchannels if sep_ch else 1 
+    nt = lcdata[0].n_transits if depth_per_transit else 1
     for chn in range(nc):
-        info("%14.5f %14.5f  -  radius ratio"%(p.get_physical(chn, f_de)[0],
-                                               p.get_physical(chn, f_fn)[0]), I1)
+        for trn in range(nt):
+            info("%14.5f %14.5f  -  radius ratio"%(p.get_physical(chn, trn, f_de)[0],
+                                                   p.get_physical(chn, trn, f_fn)[0]), I1)
     for i,k in enumerate(parameterizations['physical'][1:]):
         info("%14.5f %14.5f  -  %s" %(p_de[i+1], p_fn[i+1], parameters[k].description), I1)
     nc = nchannels if sep_ld else 1 
@@ -287,13 +329,25 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
         info("%14.5f %14.5f  -  limb darkening"%(p.get_ldc(chn, f_de)[0], p.get_ldc(chn, f_fn)[0]), I1)
 
     info('Fit statistics',H2)
-    info('Differential evolution minimum %10.2f'%r_de.get_chi(),I1)
+    info('Differential evolution minimum %10.2f'%chi_de,I1)
     info('Downhill simplex minimum       %10.2f'%chi_fn,I1)
     info('')
     info("Akaike's information criterion %10.2f" %(chi_fn + 2*p.p_cur.size), I1)
     info('')
 
-#    import pylab as pl
+    import pylab as pl
+    for chn, (time,flux,sls) in enumerate(zip(times,fluxes,slices)):
+        pl.subplot(3,1,chn+1)
+        for trn, sl in enumerate(sls):
+            pl.plot(arange(sl.start, sl.stop), flux[sl],'.', c='0')
+            t = linspace(time[sl][0], time[sl][-1],200)
+            dt = t[-1]-t[0]
+            x  = (t-t[0])/dt
+            pl.plot((1.-x)*sl.start + x*sl.stop, lc(t, p.get_kipping(chn, trn, f_fn), p.get_ldc(chn, f_fn)), c='r')
+    
+    pl.show()
+    exit()
+
 #    lc = TransitLightcurve(TransitParameterization("kipping", p.p_k_min),
 #                           method=method, mode='phase', ldpar=bounds['ld'][0])
 #    ph = TWO_PI*linspace(-0.03,0.03,500)
