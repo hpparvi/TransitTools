@@ -43,3 +43,24 @@ class FitResult(object):
     def __init__(self): pass
     def get_fit(self): raise NotImplementedError
     def get_chi(self): raise NotImplementedError
+
+
+H1 = 0
+H2 = 1
+I1 = 2
+I2 = 3
+I3 = 4
+
+def info(msg, style=10):
+    if style == H1:
+        logging.info(msg)
+        logging.info(len(msg)*"=")
+    elif style == H2:
+        logging.info(msg)
+        logging.info(len(msg)*"-")
+    elif style == I1:
+        logging.info(2*' '+msg)
+    elif style == I2:
+        logging.info(4*' '+msg)
+    else:
+        logging.info(msg)

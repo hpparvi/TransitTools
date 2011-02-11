@@ -5,6 +5,8 @@ from scipy.interpolate import LSQUnivariateSpline as Spline
 from numpy import abs, asarray, array, poly1d, polyfit
 from core import *
 
+#TODO: remove transits with high std
+
 class SingleTransit(object):
     def __init__(self, time, flux, ivar, tmask, bmask, number, t_center, g_range):
         self.time = time
@@ -14,6 +16,7 @@ class SingleTransit(object):
         self.number = number
         self.t_center = t_center
         self.g_range = g_range
+        self.g_range_s = np.s_[g_range[0]:g_range[1]]
 
         self.badpx_mask = bmask
         self.continuum_fit = None
@@ -24,9 +27,9 @@ class SingleTransit(object):
 
         self.zeropoint = self.flux[self.tmask].mean()
 
+
     def get_std(self, clean=True):
-        t,f = self.get_transit(mask_transit=True, cleaned=clean, normalize=True)
-        return f.std()
+        return self.get_flux(mask_transit=True, clean=clean, normalize=True).std()
 
 
     def get_flux(self, mask_transit=False, clean=None, normalize=False):
@@ -170,8 +173,7 @@ class SingleTransit(object):
 
 class MultiTransitLC(object):
     def __init__(self, time, flux, tc, p, s, t_width=0.1, mtime=True, **kwargs):
-        logging.info('Initializing the lightcurve data')
-        logging.info('--------------------------------')
+        info('Initializing lightcurve data', H1)
         ## TODO: Store the removed points in a separate array
         otime = np.abs(((time-tc+0.5*p)%p) - 0.5*p)
         phase = np.abs(((time-tc+0.5*p)%p) / p - 0.5)
@@ -204,7 +206,7 @@ class MultiTransitLC(object):
         ## =================
         ## Separate the lightcurve into transit-centered pieces of given width,
         ## each transit represented by a SingleTransit class.
-        logging.info('  Separating transits')
+        info('Separating transits',I1)
         t = np.arange(self.time.size)
         for i in range(self.n_transits):
             b = self.t_number == i
@@ -225,47 +227,77 @@ class MultiTransitLC(object):
                     self.n_transits -= 1
             else:
                 self.n_transits -= 1
-        logging.info('    Found %i good transits'%self.n_transits)
+        info('Found %i good transits'%self.n_transits, I2)
+        info('')
 
+        ## Compute initial inverse variances for the whole data
+        ## ----------------------------------------------------
         for tr in self.transits:
             tr.ivar[:] = 1./tr.get_std()**2
 
-        logging.info('  Cleaning the transit data')
+        ## Fit the per-transit continuum level
+        ## -----------------------------------
+        logging.info('  Cleaning transit data')
         logging.info('    Fitting per-transit continuum level')
         for t in self.transits:
             t.fit_continuum(**clean_pars)
 
+        ## Remove datapoints marked as bad
+        ## -------------------------------
         logging.info('    Removing bad points')
         self.clean(self.badpx_mask)
 
+        ## Clean up a possible periodic signal if a period is given
+        ## --------------------------------------------------------
         if 'ps_period' in kwargs.keys():
             logging.info('    Cleaning a periodic error signal')
             for t in self.transits:
                 t.fit_periodic_signal(kwargs['ps_period'])
+        logging.info('')
 
-        #logging.debug('  Per-transit std')
-        std = []
-        for tr in self.transits:
-            std.append(tr.get_std())
-            #logging.debug('    raw  %3i %8.5f'%(tr.number, tr.get_std(None)))
-            #logging.debug('    cont %3i %8.5f'%(tr.number, tr.get_std(['continuum'])))
-            #logging.debug('    pers %3i %8.5f'%(tr.number, tr.get_std(True)))
-            #logging.debug('')
-
-
-        self.std = np.array(std)
-
-        logging.info('  Created a lightcurve with %i points'%self.time.size)
-        logging.info('  Mean   std %10.8f'%self.get_mean_std())
-        logging.info('  Median std %10.8f'%np.median(self.std))
+        ## Remove transits with a high point-to-point scatter
+        ## --------------------------------------------------
+        logging.info('  Removing bad transits')
+        self.update_stds()
+        self.remove_bad_transits()
 
         logging.info('')
-        #self.plot()
-        #pl.show()
+        logging.info('  Created a lightcurve with %i points'%self.time.size)
+        logging.info('')
+        logging.info('  Mean   std %7.5f'%self.get_mean_std())
+        logging.info('  Median std %7.5f'%np.median(self.std))
+        logging.info('')
+
+        self.plot()
+        pl.show()
         #exit()
+        exit()
+
+
+    def remove_bad_transits(self, sigma=5.):
+        """Removes transits with point-to-point scatter higher thatn sigma*mean_std.
+        """
+        tt = np.arange(self.n_transits)
+        bad_transits = tt[(self.std - self.std.mean()) >  sigma*self.std.std()]
+        logging.info('    Found %i bad transit%s with std > %3.1f mean std' %(bad_transits.size,
+                                                                            's' if bad_transits.size > 1 else '',
+                                                                            sigma))
+        i = 0
+        for tn in bad_transits:
+            logging.info('      Removing transit %i'%(tn-i))
+            self.remove_transit(tn-i)
+            i += 1
+
 
     def get_mean_std(self):
         return self.std.mean()
+
+
+    def update_stds(self):
+        std = []
+        for tr in self.transits:
+            std.append(tr.get_std(True))
+        self.std = np.array(std)
 
 
     def clean(self, mask):
@@ -281,16 +313,41 @@ class MultiTransitLC(object):
         n = np.arange(self.time.size)
         for t in self.transits:
             b = self.t_number == t.number
-            r1 = n[b][0]
-            r2 = n[b][-1]+1
-            t.time = self.time[r1:r2]
-            t.flux = self.flux[r1:r2]
-            t.tmask = self.tmask[r1:r2]
-            t.badpx_mask = self.badpx_mask[r1:r2]
-            t.g_range = [r1,r2]
+            s = np.s_[n[b][0] : n[b][-1]+1]
+            t.time = self.time[s]
+            t.flux = self.flux[s]
+            t.tmask = self.tmask[s]
+            t.badpx_mask = self.badpx_mask[s]
+            t.g_range = [s.start, s.stop]
+            t.g_range_s = s
+
+
+    def remove_transit(self, tn):
+        sl = self.transits[tn].g_range_s
+        npts = self.transits[tn].time.size
+
+        self.phase = np.delete(self.phase, sl)
+        self.time  = np.delete(self.time, sl)
+        self.flux  = np.delete(self.flux, sl)
+        self.ivar  = np.delete(self.ivar, sl)
+        self.pntn  = np.arange(self.time.size)
+        self.badpx_mask = np.delete(self.badpx_mask, sl)
+        self.tmask = np.delete(self.tmask, sl)
+        self.t_number = np.delete(self.t_number, sl)
+
+        del self.transits[tn]
+        self.n_transits -= 1
+
+        for tr in self.transits[tn:]:
+            tr.number -= 1
+            tr.g_range[0] -= npts
+            tr.g_range[1] -= npts
+            tr_g_range_s = np.s_[tr.g_range[0]:tr.g_range[1]]
+
 
     def get_time(self):
         return self.time
+
 
     def get_flux(self):
         cleaned_lc = np.zeros(self.time.size)
@@ -300,6 +357,7 @@ class MultiTransitLC(object):
             cleaned_lc[tr.g_range[0]:tr.g_range[1]] = f / tr.zeropoint
 
         return 1.+cleaned_lc
+
 
     def plot(self, fig=0):
         pl.figure(fig)
