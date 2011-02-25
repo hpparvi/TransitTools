@@ -1,7 +1,5 @@
-#!/usr/bin/env python
 import numpy as np
 
-from scipy import weave
 from scipy.special import jacobi, gamma, gammaln
 from numpy import exp
 
@@ -13,7 +11,7 @@ class Gimenez(TransitModel):
     
     Adapted from the code at http://thor.ieec.uab.es/LRVCode"""
 
-    def __init__(self, method='python', n_threads=0, float_t=np.float32):
+    def __init__(self, method='python', n_threads=0, float_t=np.float64):
         self.float_t = float_t
         self.n_threads = n_threads
         self.method = method
@@ -22,12 +20,11 @@ class Gimenez(TransitModel):
             self.shape   = self._shape_py
         elif method == 'fortran':
             import gimenez_f
-            self.shape = gimenez_f.gimenez_f.gimenez
+            self.shape = gimenez_f.gimenez.c_gimenez
 
-    def __call__(self, z, r, u=[], npol=100, n_threads=0):
+    def __call__(self, z, r, u=[], npol=300, n_threads=0):
         return self.shape(z, r, u, npol, n_threads)
 
-    
     def _shape_py(self, z, r, u=[], npol=100, n_threads=0):
         """
         Transit light curve model by A. Gimenez (A&A 450, 1231--1237, 2006).

@@ -24,7 +24,7 @@ module gimenez
   integer, parameter :: FD = C_DOUBLE
 
 contains
-  subroutine c_gimenez(z, r, u, npol, nz, nu, nt, res)
+  subroutine c_gimenez(z, r, u, npol, nt, nz, nu, res)
     use omp_lib
     implicit none
     integer, intent(in) :: nz, nu, nt, npol
@@ -33,16 +33,21 @@ contains
     real(8), intent(in) :: r
     real(8), intent(out), dimension(nz) :: res
 
-    logical, dimension(nz) :: tmask
-    real(8), dimension(nz) :: z_tr, tres
-
+    logical, dimension(nz) :: mask
+    real(8), dimension(:), allocatable :: z_t, res_t
+    integer :: nz_t
+    
     !$ if (nt /= 0) call omp_set_num_threads(nt)
 
-    res   = 1._fd
-    tmask = (z > 0._fd) .and. (z < 1._fd+r)
-    z_tr  = pack(z, tmask)
-    tres  = gimenez_v(z_tr, u, r, npol)
-    res   = unpack(tres, tmask, res)
+    res  = 1._fd
+    mask = (z > 0._fd) .and. (z < 1._fd+r)
+    nz_t = count(mask)
+
+    allocate(z_t(nz_t), res_t(nz_t))
+    z_t   = pack(z, mask)
+    res_t = gimenez_v(z_t, u, r, npol)
+    res   = unpack(res_t, mask, res)
+    deallocate(z_t, res_t)
 
   end subroutine c_gimenez
 
@@ -63,7 +68,7 @@ contains
 
     a  = 0._fd
     Cn = 1._fd
-    n  = [(i, i=0,size(u)+1)]
+    n  = [(i, i=0,size(u))]
     b  = r/(1._fd+r)
     c  = z/(1._fd+r)
     
