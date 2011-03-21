@@ -5,9 +5,9 @@ from numpy import array
 from types import MethodType
 from numpy import asarray
 
-from TransitLightCurve.core import *
-from TransitLightCurve.transitlightcurve import TransitLightcurve
-from TransitLightCurve.utilities import bin, fold
+from transitLightCurve.core import *
+from transitLightCurve.transitlightcurve import TransitLightcurve
+from transitLightCurve.utilities import bin, fold
 
 from de import DiffEvol
 from mcmc import MCMC

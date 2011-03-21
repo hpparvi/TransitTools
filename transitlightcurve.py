@@ -9,9 +9,9 @@ from geometry import Geometry
 from transitparameterization import TransitParameterization
 
 class TransitLightcurve(object):
-    def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time', method='fortran'):
+    def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time', method='fortran', zeropoint=1., npol=500, n_threads=0):
         self.parm  = parm 
-        self.model = model if model is not None else Gimenez(method=method)
+        self.model = model if model is not None else Gimenez(method=method, zeropoint=zeropoint, n_threads=n_threads)
         self.orbit = orbit if orbit is not None else Geometry(mode=mode)
         self.ldpar = ldpar if ldpar is not None else []
         self.orbit.update(self.parm)
@@ -31,10 +31,10 @@ class TransitLightcurve(object):
 class TestLightcurve(TransitLightcurve):
     def __init__(self, tc=1., p=4., k=0.1, a=10., b=0., noise=1e-3,  ldpar=None,
                  mode='time', method='fortran', time_lim=[0., 2.], resolution=1500,
-                 variability=None, snoise=None):
+                 variability=None, snoise=None, npol=500):
 
         parm = TransitParameterization('physical', [k, tc, p, a, b])
-        super(TestLightcurve, self).__init__(parm, ldpar=ldpar, mode=mode, method=method)
+        super(TestLightcurve, self).__init__(parm, ldpar=ldpar, mode=mode, method=method, zeropoint=1., npol=npol)
         self.noise = noise
         self.resolution = resolution
         self.time_lim = time_lim

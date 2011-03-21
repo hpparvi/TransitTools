@@ -24,13 +24,13 @@ module gimenez
   integer, parameter :: FD = C_DOUBLE
 
 contains
-  subroutine c_gimenez(z, r, u, npol, nt, nz, nu, res)
+  subroutine c_gimenez(z, r, u, npol, zeropoint, nt, nz, nu, res)
     use omp_lib
     implicit none
     integer, intent(in) :: nz, nu, nt, npol
     real(8), intent(in), dimension(nz) :: z
     real(8), intent(in), dimension(nu) :: u
-    real(8), intent(in) :: r
+    real(8), intent(in) :: r, zeropoint
     real(8), intent(out), dimension(nz) :: res
 
     logical, dimension(nz) :: mask
@@ -39,7 +39,7 @@ contains
     
     !$ if (nt /= 0) call omp_set_num_threads(nt)
 
-    res  = 1._fd
+    res  = 0._fd
     mask = (z > 0._fd) .and. (z < 1._fd+r)
     nz_t = count(mask)
 
@@ -48,6 +48,8 @@ contains
     res_t = gimenez_v(z_t, u, r, npol)
     res   = unpack(res_t, mask, res)
     deallocate(z_t, res_t)
+
+    res = zeropoint + res
 
   end subroutine c_gimenez
 
@@ -82,7 +84,7 @@ contains
     end if
     
     do i=1,size(z)
-       gimenez_v(i) = 1._fd - sum(a(i,:)*Cn)
+       gimenez_v(i) = -sum(a(i,:)*Cn)
     end do
   end function gimenez_v
   
@@ -103,12 +105,19 @@ contains
     integer :: i
 
     nu   = (real(n,8)+2._fd)/2._fd
+
+    !$omp parallel workshare default(shared)
     norm = b*b * (1._fd - c*c)**(1._fd + nu) / (nu * GAMMA(1._fd + nu))
+    !$omp end parallel workshare
 
     call jacobi(npol, 0._fd, 1._fd+nu, 1._fd-2._fd*c**2,      d)
     call jacobi(npol,    nu,    1._fd, 1._fd-2._fd*(1._fd-b), e)
 
     sm = 0._fd
+    !$omp parallel default(none) private(i,nm,vl) shared(alpha,npol,nu,b,c,d,e,sm,norm)
+    !$omp do &
+    !$omp schedule(dynamic,50) &
+    !$omp reduction(+:sm)
     do i = 0, npol-1
        nm = log_gamma(nu+i+1.) - log_gamma(i+2._fd)
        vl = (-1)**i * (2._fd+2._fd*i+nu)*exp(nm)
@@ -116,8 +125,13 @@ contains
        e(:, i+1) = e(:, i+1) * exp(nm)
        sm  = sm + (vl * d(:,i+1) * e(:,i+1)**2) 
     end do
+    !$omp end do
 
+    !$omp workshare
     alpha = norm * sm
+    !$omp end workshare
+
+    !$omp end parallel
   end function alpha
 
   !!--- Jacobi polynomials ---
@@ -126,7 +140,8 @@ contains
   !! only major difference is that the routine computes the values for
   !! multiple x at the same time.
   !!
-  pure subroutine jacobi(npol, alpha, beta, x, cx)
+  subroutine jacobi(npol, alpha, beta, x, cx)
+    use omp_lib
     implicit none
     integer, intent(in) :: npol
     real(8), intent(in) :: alpha, beta
@@ -136,16 +151,22 @@ contains
     real(8) :: ri, c1, c2, c3, c4
     integer :: i
 
+    !$omp parallel default(shared)
+    !$omp workshare 
     cx(:,1) = 1._fd
     cx(:,2) = ( 1._fd + 0.5_fd * ( alpha + beta ) ) * x + 0.5_fd * ( alpha - beta )
+    !$omp end workshare
     do i = 2, npol-1
        ri = real(i,8)
        c1 = 2._fd * ri * ( ri + alpha + beta ) * ( 2._fd * ri - 2._fd + alpha + beta )
        c2 = ( 2._fd* ri - 1._fd + alpha + beta ) * ( 2._fd * ri  + alpha + beta ) * ( 2._fd* ri - 2._fd + alpha + beta )
        c3 = ( 2._fd* ri - 1._fd + alpha + beta ) * ( alpha + beta ) * ( alpha - beta )
        c4 = - 2._fd * ( ri - 1._fd + alpha ) * ( ri - 1._fd + beta )  * ( 2._fd* ri + alpha + beta )
+       !$omp workshare
        cx(:, i+1) = ( ( c3 + c2 * x ) * cx(:,i) + c4 * cx(:,i-1) ) / c1
+       !$omp end workshare
     end do
+    !$omp end parallel
   end subroutine jacobi
 
 end module gimenez

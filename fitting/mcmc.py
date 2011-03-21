@@ -13,14 +13,26 @@ import scipy as sp
 import tables as tbl
 import scipy.signal
 
+from math import exp
 from numpy import pi, sin, sqrt, arccos
-from base import *
+
+from transitLightCurve.core import *
 
 try:
     from mpi4py import MPI
     with_mpi = True
 except ImportError:
     with_mpi = False
+
+class MCMCParameter(object):
+    def __init__(self, name, descr, p0, sigma, limits, index, draw_function):
+        self.name = name
+        self.description = descr
+        self.p0 = p0
+        self.sigma = sigma
+        self.limits = limits
+        self.index = index
+        self.draw_function = draw_function
 
 class MCMC(object):
     """
@@ -29,7 +41,7 @@ class MCMC(object):
     def __init__(self, chifun, 
                  p0, p_limits, p_free, p_sigma, p_names, p_descr, 
                  n_chains, n_steps, seed=0, 
-                 burn_in=0.2, cor_len=1, dtype='Cyclic', verbose=True, use_mpi=False):
+                 burn_in=0.2, cor_len=1, dtype='Gibbs', verbose=True, use_mpi=False):
 
         if with_mpi and use_mpi:
             self.cm = MPI.COMM_WORLD
@@ -62,30 +74,45 @@ class MCMC(object):
         self.n_parms = len(p0)
         self.seed = seed
                 
+        self.p0 = np.asarray(p0).copy()
         self.p = np.asarray(p0).copy()
         self.p_limits = np.asarray(p_limits)
         self.p_free = np.asarray(p_free)
         self.p_sigma = np.asarray(p_sigma)
         self.p_names = p_names
         self.p_description = p_descr
-
         np.random.seed(seed)
         self.result = MCMCResult(n_chains, n_steps, self.n_parms, p_names, p_descr, burn_in, cor_len)
-                
+
         self._pn = np.arange(self.n_parms)[self.p_free]
         self._pi = 0
         
-        drawTypes = {'Cyclic':self._drawNewCyclic, 'Random':self._drawNewRandom, 'All':self._drawNewAll}
-        acceptionTypes = {'Exp':self._acceptStepExp}
+        drawTypes = {'Metropolis': self._draw_Metropolis,
+                     'Gibbs':self._draw_Gibbs,
+                     'Random':self._drawNewRandom,
+                     'All':self._drawNewAll}
+
+        acceptionTypes = {'ChiLikelihood':self._acceptStepChiLikelihood}
     
         self.drawNew = drawTypes[dtype]
-        self.acceptStep = acceptionTypes['Exp']
+        self.acceptStep = acceptionTypes['ChiLikelihood']
         self.verbose = verbose
 
+
+    def _draw_Gibbs_independence(self, pCur):
+        i = self._pn[self._pi]
+        pNew[i] = np.random.normal(self.p0[i], self.p_sigma[i])
+        self._pi = (self._pi + 1) % self._pn.size
+        return pNew, i
+
+
+    def _draw_Metropolis(self, pCur):
+        return pCur.copy() + self.p_free*self.p_sigma*np.random.normal(size=self.p.size), 0
+
     def _drawNewAll(self, pCur):
-        return pCur.copy() + self.pFree*self.pSigma*np.random.normal(self.p.size)
+        return pCur.copy() + self.pFree*self.pSigma*np.random.normal(size=self.p.size)
     
-    def _drawNewCyclic(self, pCur):
+    def _draw_Gibbs(self, pCur):
         i = self._pn[self._pi]
         pNew = pCur.copy()
         pNew[i] += np.random.normal(0., self.p_sigma[i])
@@ -99,13 +126,13 @@ class MCMC(object):
         self._pi = (self._pi + 1) % self._pn.size
         return pNew, i
     
-    def _acceptStepExp(self, X0, Xt):
-        P = np.exp(-0.5*(Xt - X0))
-        if np.random.random() < P:
+    def _acceptStepChiLikelihood(self, X0, Xt):
+        if Xt < X0 or np.random.random() < exp(0.5*(X0 - Xt)):
             return True
         else:
             return False
-        
+    
+
     def __call__(self):
         """The main Markov Chain Monte Carlo routine in all its simplicity."""
         
@@ -114,11 +141,14 @@ class MCMC(object):
         for chain in xrange(self.n_chains):
             logging.info('Starting node %2i  chain %2i  of %2i' %(self.rank, chain+1, self.n_chains))
             P_cur = self.p.copy()
+            #PT = P_cur.copy()
+            #PT[1] = 0.5*(P_cur[1] + P_cur[2])
+            #PT[2] = 0.5*(P_cur[1] - P_cur[2])
             X_cur = self.chifun(P_cur)
     
             for i in xrange(self.n_steps):
                 P_try, pi_try = self.drawNew(P_cur)
-                
+                                
                 if np.any(P_try < self.p_limits[:, 0]) or np.any(P_try > self.p_limits[:, 1]):
                     X_try = 1e18
                 else:
@@ -135,7 +165,18 @@ class MCMC(object):
                 else:
                     self.result.steps[chain, i,:] = P_cur.copy()
                     self.result.chi[chain, i] = X_cur
+
+                if i!=0 and i%100 == 0:
+                    print "%2i %5i"%(self.rank, i), self.result.get_acceptance()
+                    pl.figure(10)
+                    pl.clf()
+                    for ip in range(3):
+                        pl.subplot(3,1,ip+1)
+                        pl.plot(self.result.steps[0,:i:3,ip])
+                        pl.savefig('mcmcdebug_n%i.pdf'%self.rank)
                     
+                #if i%3 == 0: print "%4i %8.3f"%(i, X_cur), P_cur
+
         ## --- MPI communication ---
         ##
         if self.use_mpi:
