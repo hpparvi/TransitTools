@@ -172,7 +172,7 @@ class SingleTransit(object):
 
 
 class MultiTransitLC(object):
-    def __init__(self, time, flux, err, tc, p, s, t_width=0.1, mtime=True, **kwargs):
+    def __init__(self, name, time, flux, err, tc, p, s, t_width=0.1, mtime=True, **kwargs):
         info('Initializing lightcurve data', H1)
         ## TODO: Store the removed points in a separate array
         otime = np.abs(((time-tc+0.5*p)%p) - 0.5*p)
@@ -182,8 +182,7 @@ class MultiTransitLC(object):
         clean_pars = {'n_iter':15, 'top':5.0, 'top':15.0}
         if 'clean_pars' in kwargs.keys(): clean_pars.update(kwargs['clean_pars'])
         
-        self.channel = kwargs.get('channel',None)
-
+        self.name  = name
         self.phase = phase[mask]
         self.time  = time[mask]
         self.flux  = flux[mask]
