@@ -1,5 +1,7 @@
 import sys
 from types import MethodType
+from math import sin
+
 import numpy as np
 
 from transitLightCurve.core import *
@@ -64,9 +66,9 @@ class FitnessFunction(object):
             addl(c, "    for ch, (time,flux,ivar,sls) in enumerate(zip(self.times,self.fluxes,self.ivars,self.slices)):")
             addl(c, "        for tr, sl in enumerate(sls):")
             if self.parm.fit_ttv:
-                addl(c, "            chi += ((flux[sl] - self.ttv_model(self.time[sl], ch, tr, p_ttv))**2 * ivar[sl]).sum()")
+                addl(c, "            chi += ((flux[sl] - self.ttv_model(time[sl], ch, tr, p_ttv))**2 * ivar[sl]).sum()")
             else:
-                addl(c, "            chi += ((flux[sl] - self.basic_model(self.time[sl], ch, tr))**2 * ivar[sl]).sum()")
+                addl(c, "            chi += ((flux[sl] - self.basic_model(time[sl], ch, tr))**2 * ivar[sl]).sum()")
             addl(c, "    return chi")
         addl(c, "  else:")
         addl(c, "    return 1e18")
