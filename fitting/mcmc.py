@@ -13,10 +13,12 @@ import scipy as sp
 import tables as tbl
 import scipy.signal
 
-from math import exp
-from numpy import pi, sin, sqrt, arccos
+from math import exp, log, sqrt
+from numpy import pi, sin, arccos, asarray
+from numpy.random import normal
 
 from transitLightCurve.core import *
+from mcmcprior import mcmcpriors, UniformPrior, JeffreysPrior
 
 try:
     from mpi4py import MPI
@@ -24,37 +26,66 @@ try:
 except ImportError:
     with_mpi = False
 
+
+class DrawSample(object): pass
+
+
+class DrawGaussian(DrawSample):
+    def __init__(self, sigma):
+        self.sigma = sigma
+
+    def __call__(self, x): return normal(x, self.sigma)
+
+
+class DrawGaussianIndependence(DrawSample):
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std  = std
+
+    def __call__(self, x): raise NotImplementedError                      
+
+draw_functions = {'gaussian':DrawGaussian}
+
+
 class MCMCParameter(object):
-    def __init__(self, name, descr, p0, sigma, limits, index, draw_function):
+    def __init__(self, name, descr, start_value, draw_function, prior):
         self.name = name
         self.description = descr
-        self.p0 = p0
-        self.sigma = sigma
-        self.limits = limits
-        self.index = index
-        self.draw_function = draw_function
+        self.start_value = start_value
+        self._draw_method = draw_function
+        self._prior = prior
+
+    def draw(self, x):
+        return self._draw_method(x)
+
+    def prior(self, x):
+        return self._prior(x)
+
 
 class MCMC(object):
     """
     Class encapsulating the mcmc run.
     """
-    def __init__(self, chifun, 
-                 p0, p_limits, p_free, p_sigma, p_names, p_descr, 
-                 n_chains, n_steps, seed=0, 
-                 burn_in=0.2, cor_len=1, dtype='Gibbs', verbose=True, use_mpi=False):
-
-        if with_mpi and use_mpi:
+    def __init__(self, chifun, parameter_defs, **kwargs):
+        
+        self.seed     = kwargs.get('seed', 0)
+        self.n_chains = kwargs.get('n_chains', 1)
+        self.n_steps  = kwargs.get('n_steps', 200) 
+        self.thinning = kwargs.get('thinning', 1) 
+        self.use_mpi  = kwargs.get('use_mpi', True) 
+        self.verbose  = kwargs.get('verbose', True) 
+        
+        if with_mpi and self.use_mpi:
             self.cm = MPI.COMM_WORLD
             self.rank = self.cm.Get_rank()
             self.size = self.cm.Get_size()
-            self.use_mpi = True
             
-            seed += self.rank
-            n_chains_loc     = n_chains//self.size
+            self.seed += self.rank
+            n_chains_loc     = self.n_chains//self.size
             self.chain_start = self.rank * n_chains_loc
     
             if self.rank == self.size-1:
-                self.chain_end = n_chains
+                self.chain_end = self.n_chains
                 n_chains_loc = self.chain_end - self.chain_start
             else:
                 self.chain_end = self.chain_start + n_chains_loc
@@ -62,73 +93,47 @@ class MCMC(object):
             if self.rank != 0:
                 n_chains = n_chains_loc
             
-            logging.info('Created node %i with %i chains (%i--%i)'%(self.rank, n_chains, self.chain_start+1, self.chain_end))
+            logging.info('Created node %i with %i chains (%i--%i)'%(self.rank, self.n_chains, self.chain_start+1, self.chain_end))
         else:        
             self.use_mpi = False
             self.rank = 0
             self.size = 1
-        
-        self.chifun = chifun
-        self.n_chains = n_chains
-        self.n_steps = n_steps
-        self.n_parms = len(p0)
-        self.seed = seed
-                
-        self.p0 = np.asarray(p0).copy()
-        self.p = np.asarray(p0).copy()
-        self.p_limits = np.asarray(p_limits)
-        self.p_free = np.asarray(p_free)
-        self.p_sigma = np.asarray(p_sigma)
-        self.p_names = p_names
-        self.p_description = p_descr
-        np.random.seed(seed)
-        self.result = MCMCResult(n_chains, n_steps, self.n_parms, p_names, p_descr, burn_in, cor_len)
 
-        self._pn = np.arange(self.n_parms)[self.p_free]
-        self._pi = 0
-        
-        drawTypes = {'Metropolis': self._draw_Metropolis,
-                     'Gibbs':self._draw_Gibbs,
-                     'Random':self._drawNewRandom,
-                     'All':self._drawNewAll}
+        np.random.seed(self.seed)
+
+        self.chifun = chifun
+        self.fitpar = self.chifun.parm
+        self.n_parms = self.fitpar.n_fitted_parameters
+
+        self.parameters = []
+        self.p_names = self.fitpar.get_parameter_names()
+        self.p_descr = self.fitpar.get_parameter_descriptions()
+
+        try:
+            for name, descr in zip(self.p_names, self.p_descr):
+                self.parameters.append(MCMCParameter(name, descr,
+                                                     parameter_defs[name]['start_value'],
+                                                     parameter_defs[name]['draw_function'],
+                                                     parameter_defs[name]['prior']))
+        except KeyError:
+            print "Error: no sigma given for parameter %s" %name
+            sys.exit()
+
+        self.p0 = asarray([p.start_value for p in self.parameters])
+        self.p  = self.p0.copy()
+
+        self.result = MCMCResult(self.n_chains, self.n_steps, self.n_parms, self.p_names, self.p_descr)
 
         acceptionTypes = {'ChiLikelihood':self._acceptStepChiLikelihood}
-    
-        self.drawNew = drawTypes[dtype]
         self.acceptStep = acceptionTypes['ChiLikelihood']
-        self.verbose = verbose
 
 
-    def _draw_Gibbs_independence(self, pCur):
-        i = self._pn[self._pi]
-        pNew[i] = np.random.normal(self.p0[i], self.p_sigma[i])
-        self._pi = (self._pi + 1) % self._pn.size
-        return pNew, i
-
-
-    def _draw_Metropolis(self, pCur):
-        return pCur.copy() + self.p_free*self.p_sigma*np.random.normal(size=self.p.size), 0
-
-    def _drawNewAll(self, pCur):
-        return pCur.copy() + self.pFree*self.pSigma*np.random.normal(size=self.p.size)
-    
-    def _draw_Gibbs(self, pCur):
-        i = self._pn[self._pi]
-        pNew = pCur.copy()
-        pNew[i] += np.random.normal(0., self.p_sigma[i])
-        self._pi = (self._pi + 1) % self._pn.size
-        return pNew, i
-        
-    def _drawNewRandom(self, pCur):
-        i = self._pn[int(np.floor(np.random.random()*self._pn.size))]
-        pNew = pCur.copy()
-        pNew[i] += np.random.normal(0., self.pSigma[i])
-        self._pi = (self._pi + 1) % self._pn.size
-        return pNew, i
-    
-    def _acceptStepChiLikelihood(self, X0, Xt):
-        if Xt < X0 or np.random.random() < exp(0.5*(X0 - Xt)):
-            return True
+    def _acceptStepChiLikelihood(self, X0, Xt, prior_ratio):
+        if prior_ratio > 0.:
+            if X0-Xt > 200 or np.random.random() < prior_ratio * exp(0.5*(X0 - Xt)):
+                return True
+            else:
+                return False
         else:
             return False
     
@@ -136,49 +141,54 @@ class MCMC(object):
     def __call__(self):
         """The main Markov Chain Monte Carlo routine in all its simplicity."""
         
-        ## --- MCMC ---
-        ##
+        ## MCMC main loop
+        ## ==============
         for chain in xrange(self.n_chains):
             logging.info('Starting node %2i  chain %2i  of %2i' %(self.rank, chain+1, self.n_chains))
             P_cur = self.p.copy()
-            #PT = P_cur.copy()
-            #PT[1] = 0.5*(P_cur[1] + P_cur[2])
-            #PT[2] = 0.5*(P_cur[1] - P_cur[2])
+            prior_cur = asarray([p.prior(P_cur[i]) for i, p in enumerate(self.parameters)])
             X_cur = self.chifun(P_cur)
     
-            for i in xrange(self.n_steps):
-                P_try, pi_try = self.drawNew(P_cur)
-                                
-                if np.any(P_try < self.p_limits[:, 0]) or np.any(P_try > self.p_limits[:, 1]):
-                    X_try = 1e18
-                else:
-                    X_try = self.chifun(P_try)
-                    
-                self.result.accepted[chain, pi_try, 0] += 1
-    
-                if self.acceptStep(X_cur, X_try):
-                    self.result.steps[chain, i,:] = P_try.copy()
-                    self.result.chi[chain, i] = X_try
-                    P_cur[:] = P_try[:]
-                    X_cur = X_try
-                    self.result.accepted[chain, pi_try, 1] += 1
-                else:
-                    self.result.steps[chain, i,:] = P_cur.copy()
-                    self.result.chi[chain, i] = X_cur
+            P_try = P_cur.copy()
+            prior_try = prior_cur.copy()
+            for i_s in xrange(self.n_steps):
+                for i_t in xrange(self.thinning):
+                    for i_p, p in enumerate(self.parameters):
+                        P_try[i_p] = p.draw(P_cur[i_p])
+                        prior_try[i_p] = p.prior(P_try[i_p])
+                        X_try =  self.chifun(P_try)
 
-                if i!=0 and i%100 == 0:
-                    print "%2i %5i"%(self.rank, i), self.result.get_acceptance()
-                    pl.figure(10)
+                        prior_ratio = prior_try.prod() / prior_cur.prod()
+
+                        self.result.accepted[chain, i_p, 0] += 1
+
+                        if self.acceptStep(X_cur, X_try, prior_ratio):
+                            P_cur[i_p] = P_try[i_p]
+                            prior_cur[i_p] = prior_try[i_p]
+                            X_cur = X_try
+                            self.result.accepted[chain, i_p, 1] += 1
+                        else:
+                            P_try[i_p] = P_cur[i_p]
+
+                self.result.steps[chain, i_s, :] = P_cur[:]
+
+
+                ## DEBUGGING CODE
+                ## ==============
+                if i_s!=0 and i_s%150 == 0:
+                    print "%2i %5i"%(self.rank, i_s), self.result.get_acceptance()
+                    pl.figure(10, figsize=(20,20))
                     pl.clf()
-                    for ip in range(3):
-                        pl.subplot(3,1,ip+1)
-                        pl.plot(self.result.steps[0,:i:3,ip])
+                    for ip in range(self.n_parms):
+                        ax1 = pl.subplot(self.n_parms,2,ip*2+1)
+                        pl.text(0.02, 0.85, self.p_names[ip],transform = ax1.transAxes)
+                        pl.plot(self.result.steps[0,:i_s,ip])
+                        pl.subplot(self.n_parms,2,ip*2+2)
+                        pl.hist(self.result.steps[0,:i_s,ip])
                         pl.savefig('mcmcdebug_n%i.pdf'%self.rank)
-                    
-                #if i%3 == 0: print "%4i %8.3f"%(i, X_cur), P_cur
 
-        ## --- MPI communication ---
-        ##
+        ## MPI communication
+        ## =================
         if self.use_mpi:
             if self.rank == 0:
                 for node in range(1, self.size):
@@ -186,14 +196,12 @@ class MCMC(object):
                     for chain in range(cs, ce):
                         logging.info('Master receiving node %i chain %i' %(node, chain+1))
                         self.cm.Recv([self.result.steps[chain, :, :], MPI.DOUBLE], source=node, tag=77)
-                        self.cm.Recv([self.result.chi[chain, :], MPI.DOUBLE], source=node, tag=77)
                         self.cm.Recv([self.result.accepted[chain, :], MPI.DOUBLE], source=node, tag=77)
             else:
                 self.cm.send((self.chain_start, self.chain_end), dest=0, tag=11)
                 for chain in range(self.n_chains):
                     logging.info('Node %i sendind chain local:%3i  global:%3i' %(self.rank, chain+1, self.chain_start+chain+1))
                     self.cm.Send([self.result.steps[chain,:,:], MPI.DOUBLE], dest=0, tag=77)
-                    self.cm.Send([self.result.chi[chain, :], MPI.DOUBLE], dest=0, tag=77)
                     self.cm.Send([self.result.accepted[chain, :], MPI.DOUBLE], dest=0, tag=77)
         
         return self.result
@@ -202,34 +210,6 @@ class MCMC(object):
         return self.result(parameter, burn_in, cor_len, separate_chains)
 
 
-def __test(n_jumps=500, n_threads=2, test_type='Gaussian'):
-    """
-    Function for the testing of the MCMC class.
-    """
-    a = 2.0
-    mu = 0.5
-    sigma = 0.2
-    
-    x = np.linspace(0.0,2.0, 225)
-    
-    def Gaussian(p):
-        return p[0] * np.exp(-(x-p[1])**2 / (2.*p[2]**2))
-        
-    y = Gaussian([a, mu, sigma]) + np.random.normal(0, 0.05, x.size)
-        
-    def f(p):
-        return ((y-Gaussian(p))**2).sum()
-        
-    p0 = np.array([a+1.1, mu+.1, sigma+.3])
-    pL = [[0,4],[0,4],[0,2]]
-    pF = np.array([True, True, True])
-    pS = np.array([3e-1, 3e-1, 3e-1])
-    
-    mc = MCMC(f, p0, pL, pF, pS, n_jumps, n_threads)
-    mc.run()
-
-    return mc
-    
 class MCMCResult(FitResult):
     def __init__(self, n_chains, n_steps, n_parms, p_names, p_descr, burn_in = 0.2, cor_len=1):
         self.n_chains = n_chains
@@ -275,268 +255,3 @@ class MCMCResult(FitResult):
         r[r!=r] = 0.
         
         return r
-
-#    def plot_2d_param_distributions(self, figidx=0, axes=None, nb=25, params=[0,1], lims=None, interpolation='bicubic', label=None):
-#
-#        pl.figure(figidx)
-#        if axes is not None:
-#            if isinstance(axes, int):
-#                ax = pl.subplot(axes)
-#            else:
-#                ax = pl.axes(axes)
-#        else:
-#            ax = pl.axes()
-#        
-#        if label is not None:
-#            pl.text(1.-0.025, 0.9, label, va='top', ha='right', transform = ax.transAxes)
-#                
-#        pl.gray()
-#        if lims is not None:
-#            i, x, y = np.histogram2d(self(params[0]), self(params[1]), nb, lims)
-#        else:
-#            i, x, y = np.histogram2d(self(params[0]), self(params[1]), nb)
-#            
-#        pl.imshow(i.max() - i, interpolation=interpolation, extent=(y[0], y[-1], x[0], x[-1]), origin='lower', aspect='auto')
-#        #pl.contour(i, 5, origin='lower', extent=(y[0], y[-1], x[0], x[-1]), colors='0.5')
-#        pl.ylabel(self.pnames[params[0]])
-#        pl.xlabel(self.pnames[params[1]])
-#
-#        print lims
-#
-#        fmt = pl.matplotlib.ticker.ScalarFormatter()
-#        fmt.set_powerlimits((-2,2))
-#        ax.xaxis.set_major_formatter(fmt)
-#        ax.yaxis.set_major_formatter(fmt)
-#
-#    def plot_parameter(self, i, nb=50, polyorder=10, figidx=0):
-#        h  = np.histogram(self(i),nb, normed=True)
-#        hc =  0.5*(h[1][0:-1] + h[1][1:])
-#        
-#        pl.figure(figidx)
-#        pl.hist(self(i),nb, normed=True)
-#        #pl.plot(hc, sp.signal.medfilt(h[0],9))
-#
-#    def plot_parameters(self, figidx=0, axes=None, nb=25, params=None, lims=None, label=None, plot_chains=True, color='0.85', alpha=1., label_position=1):
-#
-#        if params is None:
-#            params = range(self.np)
-#
-#        pl.figure(figidx)
-#        
-#        median, mean = self.get_statistics(params, lims)
-#        
-#        for i, pIdx in enumerate(params):
-#
-#            if axes is not None:
-#                ax = pl.axes(axes[i])
-#            else:
-#                ax = pl.subplot(len(params), 1, i+1)
-#                
-#            if label is not None:
-#                pl.text(0.025, 0.15, label[i], va='top', ha='left', transform = ax.transAxes)
-#                
-#            pl.hist(self(pIdx), nb, lims[i], fc=color, histtype='stepfilled', alpha=alpha)
-#
-#            pl.axvline(median[pIdx], c='0')
-#            #pl.axvline(mean[pIdx], c='0')
-#
-#            #pl.text(1.-0.025, 0.9, 'med(p) = %4.2e' %median[pIdx], va='top', ha='right', transform = ax.transAxes)
-#
-#            if plot_chains:
-#                r = self(pIdx, True)
-#                for j in range(self.n_chains):
-#                    pl.hist(r[:,j], nb, lims[i], alpha='0.05', histtype='stepfilled')
-#                    #pl.hist(r[:,j], nb, alpha='0.05', histtype='stepfilled')
-#
-#
-#            pl.yticks([])
-#
-#            fmt = pl.matplotlib.ticker.ScalarFormatter()
-#            fmt.set_powerlimits((-2,2))
-#            ax.xaxis.set_major_formatter(fmt)
-#
-#            if label_position < 0: 
-#                pass
-#            elif label_position == 0:
-#                pl.xlabel(self.pnames[pIdx])
-#            elif label_position == 1:
-#                pl.text(1.-0.025, 0.9, self.pnames[pIdx], va='top', ha='right', transform = ax.transAxes)
-#
-#
-#            if lims is not None:
-#                pl.xlim(lims[i])
-#
-#    def print_best_fit(self, nb=50, params=None):
-#        if params is None:
-#            params = range(4)
-#        for i in params:
-#            h  = np.histogram(self(i),nb)
-#            hc =  0.5*(h[1][0:-1] + h[1][1:])
-#            m  = np.argmax(h[0])
-#            print "%s %6.2e" %(self.keys[i], hc[m])
-#
-#    def get_minimum_Chi_squared(self):
-#        return self.Chi_squared.min()
-#
-#    def get_statistics(self, idx=None, lims=None):
-#        median = np.zeros(self.np)
-#        mean   = np.zeros(self.np)
-#        
-#        if idx is None:
-#            idx = range(self.np)
-#        
-#        if lims is not None:
-#            for i, id in enumerate(idx):
-#                median[id] = np.median(self(id).compress((self(id) > lims[i][0]) & (self(id) < lims[i][1])) )
-#                mean[id] = self(id).compress((self(id) > lims[i][0]) & (self(id) < lims[i][1])).mean()
-#        else:
-#            for i in idx:
-#                median[i] = np.median(self(i))
-#                mean[i] = self(i).mean()
-#
-#        return median, mean
-#
-#    def get_best_fit(self):
-#        xp = np.argmin(self.Chi_squared)
-#        pb = np.zeros(self.np)
-#
-#        for i, k in enumerate(self.keys):
-#            pb[i] = self.data[k].ravel()[xp]
-#
-#        return pb
-#        
-#    def get_parameter_mean(self, method=np.mean):
-#        r = np.zeros(self.np, np.double)
-#        for i in range(self.np):
-#            r[i] = method(self(i))
-#        return r
-#            
-#
-#    def get_best_fit(self):
-#        minX = 1e30
-#        for t in self.simulation_thread:
-#            if t.x.min() < minX:
-#                pb = t.psim[np.argmin(t.x),  :]
-#                minX = t.x.min()
-#        return pb,  minX
-#
-#    def get_parameter_median(self):
-#        return np.median(self.get_results(), 0)
-#
-#    def get_parameter_mean(self):
-#        return self.get_results().mean(0)
-#
-#    def print_statistics(self):
-#        for t in self.simulation_thread:
-#            print "Accept ratio: ",
-#            for i in range(self.np):
-#                print "%10.6f" % (t.accepted[i,1] / t.accepted[i,0]),
-#            print ""
-#
-#        p_median = np.median(self.get_results(), 0)
-#        print "Parameter median: ",
-#        for i in range(self.np):
-#            print "%10.4e " %p_median[i],
-#        print ""
-#
-#        X = np.zeros(self.n_threads)
-#        for i, t in enumerate(self.simulation_thread):
-#            X[i] = t.x.min()
-#
-#        print "Minimum X^2: %12.6f" %X.min()
-#
-#    def plot_correlation(self, figidx=0):
-#        pl.figure(figidx)
-#        for i, t in enumerate(self.simulation_thread):
-#            for pIdx in range(self.p_0.size):
-#                pl.subplot(self.p_0.size, 1, pIdx+1)
-###                d = t.psim[int(self.burn_in_p*self.n_steps):, pIdx]
-#                d = t.psim[:, pIdx]
-#                pl.plot(sp.signal.correlate(d,d))
-#                #pl.acorr(d, normed=True, alpha=0.2)
-#
-#    def plot_parameter(self, p=0, n=25, figidx=0):
-#        r = self.get_results()
-#        pl.figure(figidx)
-#        pl.hist(r[:,p], n, fc='0.95')
-#        for i, t in enumerate(self.simulation_thread):
-#            pl.hist(t.psim[int(self.burn_in_p*self.n_steps):, p], n, alpha=0.2)
-#
-#    def plot_parameters(self, n=25, figidx=0):
-#        r = self.get_results()
-#        pl.figure(figidx)
-#        for i in range(self.np):
-#            pl.subplot(self.np, 1, i+1)
-#            pl.hist(r[:,i], n, fc='0.95', histtype='stepfilled')
-#            for t in self.simulation_thread:
-#                pl.hist(t.psim[int(self.burn_in_p*self.n_steps)::self.p_s, i], n, alpha=0.2, histtype='stepfilled')
-#
-#    def save(self, filename, channel, name, description):
-#        f = tbl.openFile(filename, 'a', "")        
-#        
-#        if not f.__contains__('/mcmc'):
-#            g_mc = f.createGroup('/', 'mcmc', 'Markov Chain Monte Carlo')
-#        else:
-#            g_mc = f.root.mcmc
-#
-#        if not g_mc.__contains__(channel):
-#            g_ch = f.createGroup(g_mc, channel, channel)
-#        else:
-#            g_ch = f.getNode(g_mc,channel)
-#
-#        if not g_ch.__contains__(name):
-#            g_sim = f.createGroup(g_ch, name, description)
-#        else:
-#            g_sim = f.getNode(g_ch, name)
-#            
-#        g_sim._v_attrs.n_steps = self.n_steps
-#        g_sim._v_attrs.n_chains = self.n_threads
-#        g_sim._v_attrs.p_names = self.p_names
-#        g_sim._v_attrs.p_description = self.p_description
-#        g_sim._v_attrs.n_variables = self.np
-#
-#        Chi_squared = np.zeros([self.n_steps, self.n_threads])
-#
-#        for i, t in enumerate(self.simulation_thread):
-#            Chi_squared[:,i] = t.x
-#
-#        if g_sim.__contains__('Chi_squared'):
-#            f.removeNode(g_sim, 'Chi_squared')
-#            
-#        f.createArray(g_sim, 'Chi_squared', Chi_squared.astype(float), 'Chi squared')
-#
-#        for i in range(self.np):
-#            if g_sim.__contains__('p%i'%i):
-#                f.removeNode(g_sim, 'p%i'%i)
-#            
-#            f.createArray(g_sim, 'p%i' %i, self.get_parameter(i).astype(np.float), self.p_description[i])
-#
-#        f.close()       
-        
-if __name__ == "__main__":
-    p0 = [1., 2., 1.]
-    pL = [[-1., 1.], [-1, 1], [-1, 1]]
-    pf = [True, True, True]
-    ps = [0.2, 0.2, 0.2]
-    pn = ['x', 'y', 'z']
-
-    mc = MCMC(lambda P: np.sum(P**2), p0, pL, pf, ps, pn, pn, 4, 1000, use_mpi=True)
-    mc()
-    if mc.rank == 0:
-        r = mc.get_results(0, 10)
-        for c in range(mc.n_chains):
-            pl.plot(r[c, :, 0])
-        pl.show()
-
-#    print "Running MCMC test with %i jumps and %i threads." %(n_jumps, n_threads)
-#
-#    mc = __test(n_jumps, n_threads)
-
-#    mc.print_statistics()
-#    mc.plot_correlation()
-#    mc.plot_parameter(0, figidx=100)
-#    mc.plot_parameter(1, figidx=101)
-#    mc.plot_parameter(2, figidx=102)
-#    pl.show()
-
-
