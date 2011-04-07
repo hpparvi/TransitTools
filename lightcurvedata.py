@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as pl
 
 from scipy.interpolate import LSQUnivariateSpline as Spline
-from numpy import abs, asarray, array, poly1d, polyfit
+from numpy import abs, asarray, array, poly1d, polyfit, concatenate, repeat
 from core import *
 
 class SingleTransit(object):
@@ -26,40 +26,18 @@ class SingleTransit(object):
         self.zeropoint = self.flux[self.tmask].mean()
 
 
-    def get_std(self, clean=True):
-        return self.get_flux(mask_transit=True, clean=clean, normalize=True).std()
+    def get_std(self, clean=True, normalize=True):
+        return self.get_flux(mask_transit=True, clean=clean, normalize=normalize).std()
 
-
-    def get_flux(self, mask_transit=False, clean=None, normalize=False):
+    def get_flux(self, mask_transit=False, clean=True, normalize=True):
         """Returns the observed flux.
-
-           Returns the observed flux datapoints.
-
-           Options
-             mask_transit  bool  
-                           Should the transit be masked away.
-
-             clean         bool or ['continuum','periodic'] 
-                           Should the cleaning steps be applied.
-
-             normalize     bool
-                           Should the data be normalized.
-
         """
-        flux = self.flux.copy()
-        if clean is not None:
-            stages = np.zeros(2, np.bool)
-            if isinstance(clean,bool) and clean:
-                stages[:] = True
-            else:
-                stages[0] = 'continuum' in clean
-                stages[1] = 'periodic'  in clean
-
-            if stages[0] and self.continuum_fit is not None:
-                flux -= self.continuum_fit(self.time - self.t_center)
-            if stages[1] and self.periodic_signal is not None:
-                flux -= self.periodic_signal(self.time % self.periodic_sig_p)
-        if normalize: flux /= self.zeropoint
+        if clean and self.continuum_fit is not None:
+            cf = self.continuum_fit(self.time - self.t_center)
+            flux = self.flux/cf if normalize else self.flux/cf*cf.mean()
+        else:
+            flux = self.flux.copy()
+                
         return flux if not mask_transit else flux[self.tmask]
 
     
@@ -77,26 +55,32 @@ class SingleTransit(object):
         t, f = self.get_transit()
         t -= self.t_center
 
-        emask =  self.err < 1e-5
-        emask =  self.err > -1e5
+        tmask = self.tmask
+        emask = self.err < 1e-5
+        emask = self.err > -1e5
+        bmask = self.badpx_mask.copy()
 
-        bm = self.badpx_mask.copy()
+        ## First fit the background continuum flux with a second order polynomial,
+        ## iterate n times and remove deviating points.
         for j in range(n_iter):
-            fit = poly1d(polyfit(t[self.tmask][bm[self.tmask]], f[self.tmask][bm[self.tmask]], 2))
-            crf = f - fit(t)
-            self.err[emask] = crf[self.tmask][bm[self.tmask]].std()
-            bm = np.logical_and(bm, crf <   top    * self.err)
-            bm = np.logical_and(bm, crf > - bottom * self.err)
+            mask = np.logical_and(bmask, tmask)
+            fit = poly1d(polyfit(t[mask], f[mask], 2))
+            crf = f / fit(t)
+            std = crf[mask].std()
+            bmask[tmask] = np.logical_and(bmask[tmask], crf[tmask]-1. <   top    * std)
+            bmask[tmask] = np.logical_and(bmask[tmask], crf[tmask]-1. > - bottom * std)
 
-        self.zeropoint = fit(t).mean()
-        self.ivar[:]   = 1./self.err**2
+        self.err[emask]    = (f/fit(t)*fit(t).mean())[mask].std()
+        self.ivar[:]       = 1./self.err**2
+        self.zeropoint     = fit(t).mean()
         self.continuum_fit = fit
-        self.badpx_mask[:] = bm
+        self.badpx_mask[:] = bmask        
+        info("      Rejected %i overliers"%(~bmask).sum())
 
 
     def fit_periodic_signal(self, period, nknots=10, nper=150):
-        t, f = self.get_transit(mask_transit=True, cleaned=True)
-        p = t % period
+        t, f = self.get_transit(mask_transit=True, cleaned=True, normalize=False)
+        p    = t % period
 
         sid = np.argsort(p)
         p_ord = p[sid]
@@ -109,9 +93,11 @@ class SingleTransit(object):
         self.periodic_sig_p  = period
         self.periodic_signal = s
 
-        self.err[:]  = self.get_std() #self.get_flux(mask_transit=True, clean=True, normalize=False).std()
+        self.flux -= s(self.time%period)
+
+        self.err[:]  = self.get_std(normalize=False)
         self.ivar[:] = 1./self.err**2
-        
+
 
     def plot_periodic_signal(self, fig=0):
         pl.figure(fig)
@@ -179,6 +165,7 @@ class MultiTransitLC(object):
         phase = np.abs(((time-tc+0.5*p)%p) / p - 0.5)
         mask = otime < s if mtime else phase < s
 
+        self.fit_continuum = kwargs.get('fit_continuum', True)
         clean_pars = {'n_iter':15, 'top':5.0, 'top':15.0}
         if 'clean_pars' in kwargs.keys(): clean_pars.update(kwargs['clean_pars'])
         
@@ -233,17 +220,14 @@ class MultiTransitLC(object):
         info('Found %i good transits'%self.n_transits, I2)
         info('')
 
-        ## Compute initial inverse variances for the whole data
-        ## ----------------------------------------------------
-        for tr in self.transits:
-            tr.ivar[:] = 1./tr.get_std()**2
 
         ## Fit the per-transit continuum level
         ## -----------------------------------
-        logging.info('  Cleaning transit data')
-        logging.info('    Fitting per-transit continuum level')
-        for t in self.transits:
-            t.fit_continuum(**clean_pars)
+        if self.fit_continuum:
+            logging.info('  Cleaning transit data')
+            logging.info('    Fitting per-transit continuum level')
+            for t in self.transits:
+                t.fit_continuum(**clean_pars)
 
         ## Remove datapoints marked as bad
         ## -------------------------------
@@ -268,8 +252,12 @@ class MultiTransitLC(object):
         logging.info('  Created a lightcurve with %i points'%self.time.size)
         logging.info('')
         logging.info('  Mean   std %7.5f'%self.get_mean_std())
-        logging.info('  Median std %7.5f'%np.median(self.ferr))
+        logging.info('  Median std %7.5f'%self.get_median_std())
         logging.info('')
+
+
+        #for i, tr in enumerate(self.transits):
+        #    logging.info('%s %2i %+10.3f %+10.3f %+10.3f'%(self.name,i, (p0[i]-p0.mean())/p0e, (p1[i]- p1.mean())/p1e, (p2[i]-p2.mean())/p2e))
 
 
     def remove_bad_transits(self, sigma=5.):
@@ -287,16 +275,11 @@ class MultiTransitLC(object):
             i += 1
 
 
-    def get_mean_std(self):
-        return self.ferr.mean()
-
-    def get_transit_slices(self):
-        return [tr.g_range_s for tr in self.transits]
 
     def update_stds(self):
         std = []
         for tr in self.transits:
-            tr.err[:] = tr.get_std(True)
+            tr.err[:] = tr.get_std(normalize=False)
             tr.ivar[:] = 1./tr.err**2
 
 
@@ -350,15 +333,30 @@ class MultiTransitLC(object):
     def get_time(self):
         return self.time
 
-
-    def get_flux(self):
+    def get_flux(self, normalize=True):
         cleaned_lc = np.zeros(self.time.size)
 
         for tr in self.transits:
-            t, f = tr.get_transit(cleaned=True, normalize=True)
+            t, f = tr.get_transit(cleaned=True, normalize=normalize)
             cleaned_lc[tr.g_range[0]:tr.g_range[1]] = f
 
-        return 1.+cleaned_lc
+        return cleaned_lc
+
+    def get_std(self, normalize=True):
+        return concatenate([repeat(tr.get_std(normalize=normalize), tr.time.size) for tr in self.transits])
+
+    def get_ivar(self, normalize=True):
+        return 1./self.get_std(normalize=normalize)**2
+
+    def get_mean_std(self, normalize=True):
+        return array([tr.get_std(normalize=normalize) for tr in self.transits]).mean()
+
+    def get_median_std(self, normalize=True):
+        return np.median(array([tr.get_std(normalize=normalize) for tr in self.transits]))
+
+    def get_transit_slices(self):
+        return [tr.g_range_s for tr in self.transits]
+
 
 
     def plot(self, fig=0, tr_start=0, tr_stop=None, pdfpage=None):
@@ -387,8 +385,8 @@ class MultiTransitLC(object):
 
             t_0 += 2.2*self.s
             
-            ax1.plot(t_ot,f_ot,'.', c='0.5')
-            ax1.plot(t_it,f_it,'.', c='0.0')
+            ax1.plot(t_ot,f_ot,',', c='0.5')
+            ax1.plot(t_it,f_it,',', c='0.0')
             ax1.axvline(t_0-0.1*self.s, c='0.0')
 
             ax1.text(0.02+0.2*i, 0.1, '%3i'%(tr.number+1), transform = ax1.transAxes)
@@ -396,6 +394,7 @@ class MultiTransitLC(object):
             if tr.continuum_fit is not None:
                 tt = np.linspace(tr.time[0], tr.time[-1], 200)
                 tp = np.linspace(t_ot[0], t_ot[-1], 200)
+
                 ax1.plot(tp, tr.continuum_fit(tt-tr.t_center), c='0.9', lw=4)
                 ax1.plot(tp, tr.continuum_fit(tt-tr.t_center), c='0.0', lw=2)
 
