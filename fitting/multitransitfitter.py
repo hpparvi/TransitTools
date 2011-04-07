@@ -148,7 +148,7 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     ##
     ## Print parameters and statistics
     ## -------------------------------
-    info('Best-fit parameters',H2)
+    info('Best-fit physical parameters',H2)
     info("%14s %14s"%("DiffEvol" ,"FMin"),I1)
     nc = nchannels if p.separate_k2_ch else 1 
     nt = lcdata[0].n_transits if p.separate_zp_tr else 1
@@ -156,16 +156,24 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
         info("%14.5f %14.5f  -  radius ratio"%(p.get_physical(chn, f_de)[0],
                                                p.get_physical(chn, f_fn)[0]), I1)
 
-    for chn in range(nchannels):
-        for tr in range(nt):
-            info("%14.5f %14.5f  -  zeropoint"%(p.get_zp(chn, tr, f_de),
-                                                p.get_zp(chn, tr, f_fn)), I1)
-
     for i,k in enumerate(parameterizations['physical'][1:]):
         info("%14.5f %14.5f  -  %s" %(p_de[i+1], p_fn[i+1], parameters[k].description), I1)
+
+    info("")
+    for chn in range(nchannels):
+        for tr in range(nt):
+            info("%14.5f %14.5f  -  zeropoint ch %i"%(p.get_zp(chn, tr, f_de),
+                                                      p.get_zp(chn, tr, f_fn), chn), I1)
+
+    info("")
     nc = nchannels if p.separate_ld else 1 
     for chn in range(nc):
-        info("%14.5f %14.5f  -  limb darkening"%(p.get_ldc(chn, f_de)[0], p.get_ldc(chn, f_fn)[0]), I1)
+        ldc_de  = p.get_ldc(chn, f_de)
+        ldc_fn  = p.get_ldc(chn, f_fn)
+        if p.n_ldc == 1:
+            info("%14.5f %14.5f  -  limb darkening ch %i u"%(ldc_de[0], ldc_fn, chn), I1)
+        if p.n_ldc == 2:
+            info(" % 5.3f % 5.3f  % 5.3f % 5.3f  -  limb darkening ch %i u v"%(ldc_de[0], ldc_de[1], ldc_fn[0], ldc_fn[1], chn), I1)
 
     if p.fit_ttv:
         p_ttv_de = p.get_ttv(f_fn)
@@ -173,6 +181,11 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
 
         info("%14.5f %14.5f  -  TTV amplitude [min]"%(p_ttv_de[0]*1440, p_ttv_fn[0]*1440), I1)
         info("%14.5f %14.5f  -  TTV period [d]"%(p_ttv_de[1]/TWO_PI, p_ttv_fn[1]/TWO_PI), I1)
+
+
+    info('Best-fit fitting parameters',H2)
+    for idx, pn in enumerate(p.fitted_parameter_names):
+        info('%10s %14.5f'%(pn, p.fitted_parameters[idx]))
 
     info('Fit statistics',H2)
     info('Differential evolution minimum %10.2f'%chi_de,I1)
