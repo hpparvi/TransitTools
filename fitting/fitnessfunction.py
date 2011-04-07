@@ -21,11 +21,11 @@ class FitnessFunction(object):
         self.gl = parm.get_ldc
         self.gt = parm.get_ttv
 
-        self.times  = [t.get_time() for t in data]
-        self.fluxes = [t.get_flux() for t in data]
-        self.ivars  = [t.ivar       for t in data]
-        self.pntns  = [t.pntn       for t in data]
-        self.slices = [t.get_transit_slices() for t in data]
+        self.times  = [t.get_time()               for t in data]
+        self.fluxes = [t.get_flux(normalize=True) for t in data]
+        self.ivars  = [t.get_ivar(normalize=True) for t in data]
+        self.pntns  = [t.pntn                     for t in data]
+        self.slices = [t.get_transit_slices()     for t in data]
 
         method = kwargs.get('method', 'fortran')
 
