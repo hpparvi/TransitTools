@@ -30,7 +30,7 @@ class FitnessFunction(object):
         method = kwargs.get('method', 'fortran')
 
         self.lc = TransitLightcurve(TransitParameterization('kipping', [0.1,0,5,10,0]),
-                                    method=method, ldpar=[0], zeropoint=1., n_threads=2)
+                                    method=method, ldpar=[0], zeropoint=1., n_threads=2, npol=100)
 
         self.fitfun_code = ""
         self.generate_fitfun()

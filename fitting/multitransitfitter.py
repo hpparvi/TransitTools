@@ -39,9 +39,13 @@ class MTFitResult(FitResult):
         self.limb_darkening =  {'value':[[fit_prm.get_ldc(i, res_ds)] for i in range(fit_prm.nch)],
                                 'description':'Limb darkening coefficients per channel.'}
 
+        self.zeropoint = {'value':[[fit_prm.get_zp(i, res_ds)] for i in range(fit_prm.nch)],
+                                'description':'Zeropoint.'}
+
         self.nch = self.n_channels['value']
         self.e   = self.ephemeris['value']
         self.ldc = self.limb_darkening['value']
+        self.zp  = self.zeropoint['value']
 
     def get_fit(self):
         return self.res_ds
