@@ -13,6 +13,8 @@ import scipy as sp
 import tables as tbl
 import scipy.signal
 
+from cPickle import dump, load
+
 from math import exp, log, sqrt
 from numpy import pi, sin, arccos, asarray
 from numpy.random import normal
@@ -223,8 +225,10 @@ class MCMCResult(FitResult):
         self.steps    = np.zeros([n_chains, n_steps, n_parms])
         self.chi      = np.zeros([n_chains, n_steps])
         self.accepted = np.zeros([n_chains, n_parms, 2])
+
         
-        self.get_results = self.__call__
+        
+        #self.get_results = self.__call__
 
     def __call__(self, parameter=None, burn_in=None, cor_len=None, separate_chains=False):
         """Returns the results."""
@@ -255,3 +259,16 @@ class MCMCResult(FitResult):
         r[r!=r] = 0.
         
         return r
+
+    
+    def save(self, filename):
+        f = open(filename, 'wb')
+        dump(self, f)
+        f.close()
+
+
+def load_MCMCResult(filename):
+    f = open(filename, 'rb')
+    res = load(f)
+    f.close()
+    return res
