@@ -21,7 +21,7 @@ class DiffEvol(object):
     Implements the differential evolution optimization method by Storn & Price
     (Storn, R., Price, K., Journal of Global Optimization 11: 341--359, 1997)
     """
-    def __init__(self, fun, bounds, npop, ngen, F=0.5, C=0.5, id=0, size=1, seed=0, use_mpi=True, verbose=True):
+    def __init__(self, fun, bounds, npop, ngen, F=0.5, C=0.5, seed=0, use_mpi=True, verbose=True):
         """
 
         :param fun: the function to be minimized
@@ -71,6 +71,7 @@ class DiffEvol(object):
 
         np.random.seed(self.seed)
         self.result = DiffEvolResult(npop, self.n_parm, self.bl, self.bw)
+
 
     def __call__(self):
         """The differential evolution algorithm."""
@@ -108,9 +109,15 @@ class DiffEvol(object):
                             
             logging.info('Node %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min()))
         
-        ## --- MPI communication ---
-        ##
         if self.use_mpi:
+            self._gather_populations()
+
+        return self.result
+
+
+    def _gather_populations(self):
+        if self.use_mpi:
+            r = self.result
             if self.rank == 0:
                 tpop = np.zeros([self.size*self.n_pop,  self.n_parm])
                 tfit = np.zeros(self.size*self.n_pop)
@@ -130,68 +137,89 @@ class DiffEvol(object):
                 self.cm.Send([r.fit[:], MPI.DOUBLE], dest=0, tag=77)
                 
         self.result.minidx = np.argmin(r.fitness)
+
+
+class ParallelDiffEvol(DiffEvol):
+    """
+    Implements the parallel differential evolution method by Tasoulis et al (Tasoulis , DK, et al.,
+    Parallel differential evolution. In: Proceedings of the 2004 Congress on Evolutionary Computation
+    (IEEE Cat. No.04TH8753). IEEE; 2004:2023-2029)
+    """
+    def __init__(self, fun, bounds, npop, ngen, F=0.5, C=0.5, migration_probability=0.1, seed=0, use_mpi=True, verbose=True):
+        super(ParallelDiffEvol, self).__init__(fun, bounds, npop, ngen, F, C, seed, use_mpi, verbose)
+        self.migration_probability = migration_probability
+
+
+    def __call__(self):
+        """The differential evolution algorithm."""
+        r = self.result
+        t = np.zeros(3, np.int)
+
+        migrate = np.zeros(1, dtype=np.short)
+
+        for i in xrange(self.n_pop):
+            r.fit[i] = self.minfun(r.pop[i,:])
+            
+        for j in xrange(self.n_gen):
+            for i in xrange(self.n_pop):
+                t[:] = i
+                while  t[0] == i:
+                    t[0] = randint(self.n_pop)
+                while  t[1] == i or t[1] == t[0]:
+                    t[1] = randint(self.n_pop)
+                while  t[2] == i or t[2] == t[0] or t[2] == t[1]:
+                    t[2] = randint(self.n_pop)
+    
+                v = r.pop[t[0],:] + self.F * (r.pop[t[1],:] - r.pop[t[2],:])
+
+                ## --- CROSS OVER ---
+                crossover = random(self.n_parm) <= self.C
+                u = np.where(crossover, v, r.pop[i,:])
+
+                ## --- FORCED CROSSING ---
+                ri = randint(self.n_parm)
+                u[ri] = v[ri].copy()
+
+                ufit = self.minfun(u)
+    
+                if ufit < r.fitness[i]:
+                    r.pop[i,:] = u[:].copy()
+                    r.fit[i]   = ufit.copy()
+                    
+            ## -- migration --
+            if self.rank == 0:
+                migrate[:] = self.migration_probability > random()
+            self.cm.Bcast(migrate, 0)
+            self.cm.Barrier()
+            
+            if migrate[0]:
+                minidx = np.argmin(r.fitness)
+                rndidx = minidx
+                while rndidx == minidx:
+                    rndidx = randint(self.n_pop)
+                    
+                sendid = (self.rank+1) % self.size
+                recvid = self.size-1 if self.rank == 0 else self.rank-1
+                
+                self.cm.Send(r.pop[minidx, :], sendid, 10)
+                self.cm.Recv(r.pop[rndidx, :], recvid, 10)
+                self.cm.Send(r.fitness[minidx:minidx+1], sendid, 10)
+                self.cm.Recv(r.fitness[rndidx:rndidx+1], recvid, 10)
+                
+            logging.info('Node %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min()))
+
+        if self.use_mpi:
+            self._gather_populations()
+
         return self.result
 
 
-
-class MPIDiffEvol(object):
+class MPIDiffEvolFull(DiffEvol):
     """
     Implements the differential evolution optimization method by Storn & Price
     (Storn, R., Price, K., Journal of Global Optimization 11: 341--359, 1997)
     """
-    def __init__(self, fun, bounds, npop, ngen, F=0.5, C=0.5, id=0, size=1, seed=0, use_mpi=True, verbose=True):
-        """
-
-        :param fun: the function to be minimized
-        :param bounds: parameter bounds as [npar,2] array
-        :param npop:   the size of the population (5*D - 10*D)
-        :param  ngen:  the number of generations to run
-        :param  F:     the difference amplification factor. Values of 0.5-0.8 are good
-                       in most cases.
-        :param C:      The cross-over probability. Use 0.9 to test for fast convergence,
-                       and smaller values (~0.1) for a more elaborate search.
-        
-        N free parameters
-        N population vectors (pv1 .. pvN)
-        
-        Population = [pv1_x1 pv1_x2 pv1_x3 ... pv1_xN]
-                     [pv2_x1 pv2_x2 pv2_x3 ... pv2_xN]
-                     .
-                     .
-                     .
-                     [pvN_x1 pvN_x2 pvN_x3 ... pvN_xN]
-        
-        Population = [pv, parameter]
-        """ 
-        self.minfun = fun
-        self.bounds = asarray(bounds)
-        self.n_gen  = ngen
-        self.n_pop  = npop
-        self.n_parm = (self.bounds).shape[0]
-        self.bl = tile(self.bounds[:,0],[npop,1])
-        self.bw = tile(self.bounds[:,1]-self.bounds[:,0],[npop,1])
-        
-        self.seed = seed
-        self.F = F
-        self.C = C
-        
-        if with_mpi and use_mpi:
-            self.cm = MPI.COMM_WORLD
-            self.rank = self.cm.Get_rank()
-            self.size = self.cm.Get_size()
-            self.use_mpi = True
-            self.seed += self.rank
-            logging.info('Created node %i'%self.rank)
-        else:        
-            self.use_mpi = False
-            self.rank = 0
-            self.size = 1    
-
-        np.random.seed(self.seed)
-        self.result = DiffEvolResult(npop, self.n_parm, self.bl, self.bw)
-
     def __call__(self):
-        """The differential evolution algorithm."""
         r = self.result
         t = np.zeros(3, np.int)
 
@@ -210,12 +238,6 @@ class MPIDiffEvol(object):
         pop_curr_loc  = np.zeros([npop_loc, self.n_parm])
         pop_trial_loc = np.zeros([npop_loc, self.n_parm])
         fitness_loc   = np.zeros(npop_loc)
-
-        #if self.rank != 0:
-        #    i = self.cm.recv(source=self.rank-1, tag=12)
-        #print 'id: ', self.rank, 'npop_max: ', npop_loc_max, 'npop_loc: ', npop_loc
-        #if self.rank != self.size-1:
-        #    self.cm.send(1, dest=self.rank+1, tag=12)
 
         if self.rank == 0:
             for i in xrange(self.n_pop):
@@ -265,8 +287,6 @@ class MPIDiffEvol(object):
                 logging.info('Finished generation %4i/%4i  F = %7.5f'%(j+1,
                                                                        self.n_gen,
                                                                        fitness.min()))
-
-                    
         self.result.minidx = np.argmin(r.fitness)
         return self.result
 
@@ -293,9 +313,13 @@ class DiffEvolResult(FitResult):
         return self.population[self.minidx,:]
 
 if __name__ == '__main__':
-    de = DiffEvol(lambda P: np.sum((P-2.2)**2), [[-3, 2], [-2, 3], [-4, 2]], 50, 200, seed=0)
+    de = DiffEvol(lambda P: np.sum((P-2.2)**2), [[-3, 2], [-2, 3], [-4, 2]], 50, 50, seed=0)
+    pde = ParallelDiffEvol(lambda P: np.sum((P-2.2)**2), [[-3, 2], [-2, 3], [-4, 2]], 50, 50, seed=0,
+                           migration_probability=0.25)
+
     de()
+    pde()
         
     if de.rank == 0:
-        print de.result.get_chi()
-        print de.result.get_fit()
+        print de.result.get_chi(), pde.result.get_chi()
+        print de.result.get_fit(), pde.result.get_fit()
