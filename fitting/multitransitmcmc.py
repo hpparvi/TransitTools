@@ -14,14 +14,14 @@ from transitfitter import Fitter
 from mcmc import MCMC
 
 class MultiTransitMCMC(Fitter):
-    def __init__(self, lcdata, bounds, stellar_prm, parameter_defs, p0, mcmc_pars={}, **kwargs):
+    def __init__(self, lcdata, pars, stellar_prm, parameter_defs, p0, mcmc_pars={}, **kwargs):
 
         lcdata    = lcdata if isinstance(lcdata, list) else [lcdata]
         nchannels = len(lcdata)
 
         ## Generate the fitting parameterization
         ## =====================================
-        self.p = MTFitParameterization(bounds, stellar_prm, nchannels, lcdata[0].n_transits,
+        self.p = MTFitParameterization(pars, stellar_prm, nchannels, lcdata[0].n_transits,
                                        initial_parameter_values = p0,
                                        **kwargs)
         
