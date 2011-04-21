@@ -36,7 +36,7 @@ class SingleTransit(object):
             cf = self.continuum_fit(self.time - self.t_center)
             flux = self.flux/cf if normalize else self.flux/cf*cf.mean()
         else:
-            flux = self.flux.copy()
+            flux = self.flux.copy() if not normalize else self.flux / np.median(self.flux[self.tmask])
                 
         return flux if not mask_transit else flux[self.tmask]
 
@@ -75,8 +75,24 @@ class SingleTransit(object):
         self.zeropoint     = fit(t).mean()
         self.continuum_fit = fit
         self.badpx_mask[:] = bmask        
-        info("      Rejected %i overliers"%(~bmask).sum())
+        info("      Rejected %i outliers"%(~bmask).sum())
 
+
+    def clean_with_lc(self, lc_solution, n_iter=5, top=3., bottom=3.):
+        info("Cleaning data with an light curve solution", H1)
+        time = self.get_time()
+        flux = self.get_flux()
+
+        residuals = flux - lc_solution(time)
+        badmask   = self.badpx_mask.copy()
+
+        for i in range(n_iter):
+            std = residuals[badmask].std()
+            badmask = np.logical_and(badmask, residuals <  top*std)
+            badmask = np.logical_and(badmask, residuals > -bottom*std)
+
+        self.badpx_mask[:] = badmask
+        info("Removed %i points"%(~badmask).sum())
 
     def fit_periodic_signal(self, period, nknots=10, nper=150):
         t, f = self.get_transit(mask_transit=True, cleaned=True, normalize=False)
@@ -307,6 +323,12 @@ class MultiTransitLC(object):
             t.g_range_s = s
 
 
+    def clean_with_lc(self, lc, n_iter=5, top=5., bottom=5.):
+        for t in self.transits:
+            t.clean_with_lc(lc, n_iter, top, bottom)
+
+        self.clean(self.badpx_mask)
+
     def remove_transit(self, tn):
         sl = self.transits[tn].g_range_s
         npts = self.transits[tn].time.size
@@ -330,17 +352,11 @@ class MultiTransitLC(object):
             tr_g_range_s = np.s_[tr.g_range[0]:tr.g_range[1]]
 
 
-    def get_time(self):
-        return self.time
+    def get_time(self, mask_transits=False):
+        return concatenate([tr.get_time(mask_transit=mask_transits) for tr in self.transits])
 
-    def get_flux(self, normalize=True):
-        cleaned_lc = np.zeros(self.time.size)
-
-        for tr in self.transits:
-            t, f = tr.get_transit(cleaned=True, normalize=normalize)
-            cleaned_lc[tr.g_range[0]:tr.g_range[1]] = f
-
-        return cleaned_lc
+    def get_flux(self, mask_transits=False, normalize=True):
+        return concatenate([tr.get_flux(clean=True, mask_transit=mask_transits, normalize=normalize) for tr in self.transits])
 
     def get_std(self, normalize=True):
         return concatenate([repeat(tr.get_std(normalize=normalize), tr.time.size) for tr in self.transits])
