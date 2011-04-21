@@ -3,6 +3,7 @@ from types import MethodType
 from math import sin
 
 import numpy as np
+from numpy import asarray
 
 from transitLightCurve.core import *
 from transitLightCurve.transitlightcurve import TransitLightcurve
@@ -26,6 +27,9 @@ class FitnessFunction(object):
         self.ivars  = [t.get_ivar(normalize=True) for t in data]
         self.pntns  = [t.pntn                     for t in data]
         self.slices = [t.get_transit_slices()     for t in data]
+ 
+        for i in range(len(self.ivars)):
+            self.ivars[i] *= kwargs.get('ivar_multiplier', 1.)
 
         method = kwargs.get('method', 'fortran')
 
@@ -58,12 +62,14 @@ class FitnessFunction(object):
         addl(c, "    chi = 0.")
         if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
             addl(c, "    for ch, (time,flux,ivar) in enumerate(zip(self.times,self.fluxes,self.ivars)):")
+            addl(c, "        if ch > 0 and not np.all(asarray(self.gl(ch)) > asarray(self.gl(ch-1))): return 1e18\n")
             addl(c, "        chi += ((flux - self.basic_model(time, ch, 0))**2 * ivar).sum()")
             addl(c, "    return chi")
         else:
             if self.parm.fit_ttv:
                 addl(c, "    p_ttv = self.gt()")
             addl(c, "    for ch, (time,flux,ivar,sls) in enumerate(zip(self.times,self.fluxes,self.ivars,self.slices)):")
+            addl(c, "        if ch > 0 and not np.all(asarray(self.gl(ch)) > asarray(self.gl(ch-1))): return 1e18\n")
             addl(c, "        for tr, sl in enumerate(sls):")
             if self.parm.fit_ttv:
                 addl(c, "            chi += ((flux[sl] - self.ttv_model(time[sl], ch, tr, p_ttv))**2 * ivar[sl]).sum()")
