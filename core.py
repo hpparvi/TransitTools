@@ -16,15 +16,31 @@ import logging
 from numpy import pi as PI
 from numpy import double as DOUBLE
 
-TWO_PI  = 2.*PI
-HALF_PI = 0.5*PI
+## - Astronomical constants -
+##
+solar_radius  = 6.955e8   # [m]
+solar_mass    = 1.9891e30 # [kg]
+solar_density = 1.408e3   # [kg/m^3]
 
-d_to_s = float(24*3600)
+## - Mathematical constants -
+##
+HALF_PI = 0.5 * PI
+TWO_PI  = 2.0 * PI
 
+## - Time conversion -
+##
+min_to_d = 1./(60.*24.)
+h_to_d   = 1./24.
+d_to_s   = 24.*3600.
+
+## - Setup logging -
+##
 logging.basicConfig(filename=None, level=logging.DEBUG,
                     format='%(asctime)s %(levelname)-6s %(message)s',
                     datefmt='%m-%d %H:%M')
 
+## - PyOpenCL -
+##
 try:
     import pyopencl as cl
     with_opencl = True
@@ -32,12 +48,15 @@ except ImportError:
     logging.warning("Failed to load pyopencl: cannot use OpenCL routines.")
     with_opencl = False
 
+## - MPI4PY -
+##
 try:
     from mpi4py import MPI
     with_mpi = True
 except ImportError:
     logging.warning("Failed to load mpi4py: cannot use MPI.")
     with_mpi = False
+
 
 class FitResult(object):
     def __init__(self): pass

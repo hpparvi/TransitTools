@@ -7,14 +7,31 @@
 !! at http://thor.ieec.uab.es/LRVCode. The major changes
 !! are in the parallelization and vectorization. 
 !!
-!! Instead
-!! of repeating the computations for each lightcurve point
+!! Instead of repeating the computations for each lightcurve point
 !! separately, we minimize the redundant calculations by
 !! computing the common factors for all lightcurve points.
 !! This can give us a speed up of several orders of magnitude. 
 !!
+!! -GPL-
+!! This program is free software: you can redistribute it and/or modify
+!! it under the terms of the GNU General Public License as published by
+!! the Free Software Foundation, either version 3 of the License, or
+!! (at your option) any later version.
+!!
+!! This program is distributed in the hope that it will be useful,
+!! but WITHOUT ANY WARRANTY; without even the implied warranty of
+!! MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+!! GNU General Public License for more details.
+!!
+!! You should have received a copy of the GNU General Public License
+!! along with this program.  If not, see <http://www.gnu.org/licenses/>.
+!! -GPL-
+!!
 !! Author
-!!  Hannu Parviainen
+!!  Hannu Parviainen <hannu@iac.es>
+!!
+!! Date 
+!!  01.03.2011
 !!
 module gimenez
   use, intrinsic :: ISO_C_BINDING
@@ -90,8 +107,6 @@ contains
   
   !!--- Alpha ---
   !!
-  !!
-  !!TODO: Parallelize this with OpenMP 
   function alpha(b, c, n, npol)
     implicit none
     real(8), intent(in), dimension(:) :: b, c
