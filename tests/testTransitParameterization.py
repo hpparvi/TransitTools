@@ -1,73 +1,83 @@
 import sys
 import unittest
+
+from math import acos, asin, sqrt, pi
 from numpy.testing import assert_almost_equal as aeq
 
 sys.path.append('..')
-from TransitParameterization import *
+from transitparameterization import *
 
-p_orbit_1 = np.array([1.0, 2.5, 0.10, 10., HALF_PI])
-p_orbit_2 = np.array([1.0, 2.5, 0.05, 10., HALF_PI-0.08])
-p_orbit_l = np.array([1.0, 2.5, 0.10, 10., HALF_PI])
-p_orbit_h = np.array([1.0, 2.5, 0.10, 10., HALF_PI])
+k  = 1.0
+k2 = k**2
+tc = 3.5
+p  = 2.4
+a  = 13.0
+b  = 0.56
+b2 = b**2
+i  = acos(b/a)
+tw = (2*pi)/p/asin(sqrt(1.-b2)/(a*sin(i)))
+
+p_orbit = np.array([k,  tc, p,  a,  i])
+p_physi = np.array([k,  tc, p,  a,  b])
+p_kippi = np.array([k2, tc, p, tw, b2])
+
 
 class TestOrbitTransitParameterization(unittest.TestCase):
     def setUp(self):
-        self.p_o1 = OrbitTransitParameterization(p_orbit_1, p_orbit_l, p_orbit_h)
-        self.p_o2 = OrbitTransitParameterization(p_orbit_2, p_orbit_l, p_orbit_h)
-        
+        self.p_o = TransitParameterization('orbit', p_orbit)
+        self.p_p = TransitParameterization('physical', p_physi)
+        self.p_k = TransitParameterization('kipping', p_kippi)
+
+    def test_generate_empty(self):
+        "Generate empty orbit parameterization"
+        a = TransitParameterization('orbit')
+
     def test_mapping_to_orbit(self):
-        "Test mapping to the orbit parameterization."
-        aeq(self.p_o1.mapped_to_orbit(), self.p_o1.p)
-        aeq(self.p_o2.mapped_to_orbit(), self.p_o2.p)
+        "Map the orbit parameterization to itself"
+        p_o = TransitParameterization('orbit', p_orbit)
+        aeq(p_o.map_to_orbit().pv, p_o.pv)
+
+    def test_mapping_to_kipping(self):
+        "Test mapping the physical parameterization to the Kipping parameterization."
+        map = generate_mapping('orbit', 'kipping')
+        aeq(map(self.p_o).pv, self.p_k.pv)
 
 
 class TestPhysicalTransitParameterization(unittest.TestCase):
     def setUp(self):
-        self.p_o1 = OrbitTransitParameterization(p_orbit_1, p_orbit_l, p_orbit_h)
-        self.p_o2 = OrbitTransitParameterization(p_orbit_2, p_orbit_l, p_orbit_h)
-        self.p_p1 = PhysicalTransitParameterization(self.p_o1)
-        self.p_p2 = PhysicalTransitParameterization(self.p_o2)
-        
+        self.p_o = TransitParameterization('orbit', p_orbit)
+        self.p_p = TransitParameterization('physical', p_physi)
+        self.p_k = TransitParameterization('kipping', p_kippi)
+
+    def test_generate_empty(self):
+        "Generate empty physical parameterization"
+        a = TransitParameterization('physical')
+
     def test_mapping_to_orbit(self):
-        "Test mapping to the orbit parameterization."
-        aeq(self.p_p1.mapped_to_orbit(), self.p_o1.p)
-        aeq(self.p_p2.mapped_to_orbit(), self.p_o2.p)
+        "Test mapping the physical parameterization to the orbit parameterization."
+        aeq(self.p_p.map_to_orbit().pv, self.p_o.pv)
+
+    def test_mapping_to_kipping(self):
+        "Test mapping the physical parameterization to the Kipping parameterization."
+        map = generate_mapping('physical', 'kipping')
+        aeq(map(self.p_p).pv, self.p_k.pv)
 
 
 class TestKippingTransitParameterization(unittest.TestCase):
     def setUp(self):
-        self.p_o1 = OrbitTransitParameterization(p_orbit_1, p_orbit_l, p_orbit_h)
-        self.p_o2 = OrbitTransitParameterization(p_orbit_2, p_orbit_l, p_orbit_h)
-        self.p_k1 = KippingTransitParameterization(self.p_o1)
-        self.p_k2 = KippingTransitParameterization(self.p_o2)
+        self.p_o = TransitParameterization('orbit', p_orbit)
+        self.p_p = TransitParameterization('physical', p_physi)
+        self.p_k = TransitParameterization('kipping', p_kippi)
+
+    def test_generate_empty(self):
+        "Generate empty Kipping parameterization"
+        a = TransitParameterization('kipping')
 
     def test_mapping_to_orbit(self):
         "Test mapping to the orbit parameterization."
-        aeq(self.p_k1.mapped_to_orbit(), self.p_o1.p)
-        aeq(self.p_k2.mapped_to_orbit(), self.p_o2.p)
+        aeq(self.p_k.map_to_orbit().pv, self.p_o.pv)
 
-
-class TestParameterizationMappings(unittest.TestCase):
-    def setUp(self):
-        self.p_o1 = OrbitTransitParameterization(p_orbit_1, p_orbit_l, p_orbit_h)
-        self.p_p1 = PhysicalTransitParameterization(self.p_o1)
-        self.p_k1 = KippingTransitParameterization(self.p_o1)
-
-        self.p_o2 = OrbitTransitParameterization(p_orbit_2, p_orbit_l, p_orbit_h)
-        self.p_p2 = PhysicalTransitParameterization(self.p_o2)
-        self.p_k2 = KippingTransitParameterization(self.p_o2)
-        
-    def assert_par_equal(self, p1, p2):
-        aeq(p1.p, p2.p)
-        aeq(p1.p_low, p2.p_low)
-        aeq(p1.p_high, p2.p_high)
-        
-    def test_kipping_to_physical(self):
-        "Kipping -> physical."
-        self.assert_par_equal(self.p_k1, KippingTransitParameterization(PhysicalTransitParameterization(self.p_k1)))
-        self.assert_par_equal(self.p_k2, KippingTransitParameterization(PhysicalTransitParameterization(self.p_k2)))
-        
-    def test_physical_to_kipping(self):
-        "Physical -> Kipping."
-        self.assert_par_equal(self.p_p1, PhysicalTransitParameterization(KippingTransitParameterization(self.p_p1)))
-        self.assert_par_equal(self.p_p2, PhysicalTransitParameterization(KippingTransitParameterization(self.p_p2)))
+    def test_mapping_to_physical(self):
+        "Test mapping to the physical parameterization."
+        map = generate_mapping('kipping', 'physical')
+        aeq(map(self.p_k).pv, self.p_p.pv)
