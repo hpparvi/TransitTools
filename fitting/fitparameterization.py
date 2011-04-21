@@ -26,7 +26,7 @@ class MTFitParameter(object):
         self.soft_limits = asarray(soft_limits)
         self.description = description or parameters[name].description
         self.units = units or parameters[name].unit
-        self.value = value or self.soft_limits.mean()
+        self.value = value if value is not None else self.soft_limits.mean()
         self.hard_limits = hard_limits or self.soft_limits
         self.draw_function = draw_function
         self.prior = prior
@@ -88,7 +88,10 @@ class MTFitParameterization(object):
 
         self.n_lds = nch if self.separate_ld else 1
         self.n_ldc = 2 if 'v' in parameters.keys() else 1
-        
+        self.n_k2  = nch if self.separate_k2_ch else 1
+        self.n_zp  = nch if not self.separate_zp_tr else nch*ntr
+
+
         ## Add parameters
         ## ==============
         def count_parameter(name):
@@ -100,9 +103,6 @@ class MTFitParameterization(object):
             else:
                 self.constant_parameter_names.extend(count*[name])
 
-        self.n_k2  = nch if self.separate_k2_ch else 1
-        self.n_zp  = nch if not self.separate_zp_tr else nch*ntr
-
         for i in range(self.n_k2):
             add_parameter(self.fit_radius_ratio, 'k2')
 
@@ -111,6 +111,9 @@ class MTFitParameterization(object):
 
         add_parameter(self.fit_transit_center, 'tc') 
         add_parameter(self.fit_period, 'p') 
+
+        if self.fit_transit_width:
+            add_parameter(True, 'it')
 
         ## Impact parameter and limb darkening
         ## -----------------------------------
@@ -318,18 +321,18 @@ class MTFitParameterization(object):
         
         ## Setup constant parameters
         ## =========================
-        for i,tp in enumerate(['k2','tc','p','a','b2']):
+        if 'k2' in self.constant_parameter_names:
+            self.constant_parameters[self.constant_parameter_names=='k2'] = self.pset['k'].value**2
+
+        if 'b2' in self.constant_parameter_names:
+            self.constant_parameters[self.constant_parameter_names=='b2'] = self.pset['b'].value**2
+
+        for tp in ['tc','p','a']:
             if tp in self.constant_parameter_names:
-                self.constant_parameters[self.constant_parameter_names==tp] = self.p_k_min[i]
+                self.constant_parameters[self.constant_parameter_names==tp] = self.pset[tp].value
 
         if not self.fit_zeropoint:
             self.constant_parameters[self.constant_parameter_names=='zp'] = 1.
-
-        for name in p_init:
-            if name in self.constant_parameter_names:
-                self.constant_parameters[self.constant_parameter_names==name] = p_init[name]
-            elif name in self.fitted_parameter_names:
-                self.fitted_parameters[self.fitted_parameter_names==name] = p_init[name]
 
 
         ## Setup the soft parameter limits
@@ -338,6 +341,7 @@ class MTFitParameterization(object):
                                   repeat(p['zp'].min_s,   count_parameter('zp')),
                                   [self.p_k_min[1]]     * count_parameter('tc'),
                                   [self.p_k_min[2]]     * count_parameter('p'),
+                                  [p['it'].min_s] if self.fit_transit_width else [],
                                   ldp_min,
                                   [p['ttv a'].min_s] * count_parameter('ttv a'),
                                   [p['ttv p'].min_s] * count_parameter('ttv p')])
@@ -346,6 +350,7 @@ class MTFitParameterization(object):
                                   repeat(p['zp'].max_s,   count_parameter('zp')),
                                   [self.p_k_max[1]]     * count_parameter('tc'),
                                   [self.p_k_max[2]]     * count_parameter('p'),
+                                  [p['it'].max_s] if self.fit_transit_width else [],
                                   ldp_max,
                                   [p['ttv a'].max_s]    * count_parameter('ttv a'),
                                   [p['ttv p'].max_s]    * count_parameter('ttv p')])
@@ -356,6 +361,7 @@ class MTFitParameterization(object):
                                   repeat(0.9, count_parameter('zp')),
                                   [0.0]    *  count_parameter('tc'),
                                   [0.0]    *  count_parameter('p'),
+                                  [0.0] if self.fit_transit_width else [],
                                   ldp_min,
                                   [-1.]    * count_parameter('ttv a'),
                                   [1.]     * count_parameter('ttv p')])
@@ -364,6 +370,7 @@ class MTFitParameterization(object):
                                   repeat(1.1, count_parameter('zp')),
                                   [1e10]   *  count_parameter('tc'),
                                   [1e10]   *  count_parameter('p'),
+                                  [5e04] if self.fit_transit_width else [],
                                   ldp_max,
                                   [1.]     * count_parameter('ttv a'),
                                   [1e10]   * count_parameter('ttv p')])
@@ -372,7 +379,6 @@ class MTFitParameterization(object):
 
         info('Parameter vector length: %i' %self.p_cur.size, I1)
         info('')
-
 
     def update(self, pv):
         self.p_cur[:] = pv
@@ -388,6 +394,7 @@ class MTFitParameterization(object):
         ## =============================================================================================
         a = self.ac * (d_to_s*period)**(2/3)
         it = TWO_PI/period/asin(sqrt(1-b2)/(a*sin(acos(sqrt(b2)/a))))
+        #print it
         return it
 
 
@@ -478,11 +485,14 @@ class MTFitParameterization(object):
     ## =========
     def _generate_zp_getter(self):
         src  = "def get_zp(self, ch=0, tn=0, p_in=None):\n"
-        src += "  if p_in is not None: self.update(p_in)\n"
-        if not self.separate_zp_tr:
-            src += "  return self.fitted_parameters[%i+ch]\n"%self.fitted_parameter_index['zp 0']
+        if self.fit_zeropoint:
+            src += "  if p_in is not None: self.update(p_in)\n"
+            if not self.separate_zp_tr:
+                src += "  return self.fitted_parameters[%i+ch]\n"%self.fitted_parameter_index['zp 0']
+            else:
+                src += "  return self.fitted_parameters[%i + tn*self.nch + ch]\n"%self.fitted_parameter_index['zp 0']
         else:
-            src += "  return self.fitted_parameters[%i + tn*self.nch + ch]\n"%self.fitted_parameter_index['zp 0']
+            src += "  return 1."
         exec(src)
         self.get_zp = MethodType(get_zp, self, MTFitParameterization)
 
@@ -499,8 +509,11 @@ class MTFitParameterization(object):
         src += "  if p_out is None: p_out = zeros(5)\n"
         src += "  p_out[0] = %s[%s]\n"%(k21, k22)
         src += "  p_out[1] = %s[%i]\n"%ps['tc']
-        src += "  p_out[2] = %s[%i]\n"%ps['p'] 
-        src += "  p_out[3] = self.kipping_i(%s[%i], %s)\n"%(ps['p']+(self._generate_b2_str(),))
+        src += "  p_out[2] = %s[%i]\n"%ps['p']
+        if self.fit_transit_width:
+            src += "  p_out[3] = %s[%i]\n" %ps['it']
+        else:
+            src += "  p_out[3] = self.kipping_i(%s[%i], %s)\n"%(ps['p']+(self._generate_b2_str(),))
         src += "  p_out[4] = %s\n"%self._generate_b2_str()
         src += "  return p_out\n"
 
