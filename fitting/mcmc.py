@@ -22,12 +22,6 @@ from numpy.random import normal
 from transitLightCurve.core import *
 from mcmcprior import mcmcpriors, UniformPrior, JeffreysPrior
 
-try:
-    from mpi4py import MPI
-    with_mpi = True
-except ImportError:
-    with_mpi = False
-
 
 class DrawSample(object): pass
 
@@ -76,30 +70,16 @@ class MCMC(object):
         self.thinning = kwargs.get('thinning', 1) 
         self.use_mpi  = kwargs.get('use_mpi', True) 
         self.verbose  = kwargs.get('verbose', True) 
-        
+
+        self.autotune_length = kwargs.get('autotune_length', 2000)
+        self.autotune_strength = kwargs.get('autotune_strength', 0.5)
+
         if with_mpi and self.use_mpi:
-            self.cm = MPI.COMM_WORLD
-            self.rank = self.cm.Get_rank()
-            self.size = self.cm.Get_size()
-            
-            self.seed += self.rank
-            n_chains_loc     = self.n_chains//self.size
-            self.chain_start = self.rank * n_chains_loc
-    
-            if self.rank == self.size-1:
-                self.chain_end = self.n_chains
-                n_chains_loc = self.chain_end - self.chain_start
-            else:
-                self.chain_end = self.chain_start + n_chains_loc
-                
-            if self.rank != 0:
-                n_chains = n_chains_loc
-            
-            logging.info('Created node %i with %i chains (%i--%i)'%(self.rank, self.n_chains, self.chain_start+1, self.chain_end))
-        else:        
-            self.use_mpi = False
-            self.rank = 0
-            self.size = 1
+            self.seed += mpi_rank
+            self.n_chains_g = self.n_chains
+            self.n_chains_l = self.n_chains//mpi_size
+            if mpi_rank == mpi_size-1: self.n_chains_l += self.n_chains % mpi_size
+            logging.info('Created node %i with %i chains'%(mpi_rank, self.n_chains_l))
 
         np.random.seed(self.seed)
 
@@ -124,7 +104,7 @@ class MCMC(object):
         self.p0 = asarray([p.start_value for p in self.parameters])
         self.p  = self.p0.copy()
 
-        self.result = MCMCResult(self.n_chains, self.n_steps, self.n_parms, self.p_names, self.p_descr)
+        self.result = MCMCResult(self.n_chains_l, self.n_steps, self.n_parms, self.p_names, self.p_descr)
 
         acceptionTypes = {'ChiLikelihood':self._acceptStepChiLikelihood}
         self.acceptStep = acceptionTypes['ChiLikelihood']
@@ -145,12 +125,15 @@ class MCMC(object):
         
         ## MCMC main loop
         ## ==============
-        for chain in xrange(self.n_chains):
-            logging.info('Starting node %2i  chain %2i  of %2i' %(self.rank, chain+1, self.n_chains))
+        for chain in xrange(self.n_chains_l):
+            logging.info('Starting node %2i  chain %2i  of %2i' %(mpi_rank, chain+1, self.n_chains_l))
             P_cur = self.p.copy()
             prior_cur = asarray([p.prior(P_cur[i]) for i, p in enumerate(self.parameters)])
             X_cur = self.chifun(P_cur)
-    
+
+            at_test = np.zeros(self.n_parms, dtype=np.int)
+            
+            i_at = 0
             P_try = P_cur.copy()
             prior_try = prior_cur.copy()
             for i_s in xrange(self.n_steps):
@@ -169,16 +152,30 @@ class MCMC(object):
                             prior_cur[i_p] = prior_try[i_p]
                             X_cur = X_try
                             self.result.accepted[chain, i_p, 1] += 1
+                            at_test[i_p] += 1
                         else:
                             P_try[i_p] = P_cur[i_p]
 
-                self.result.steps[chain, i_s, :] = P_cur[:]
+                    ## Autotuning
+                    ## ==========
+                    if i_s*self.thinning + i_t < self.autotune_length and i_at == 100:
+                        for i_p, p in enumerate(self.parameters):
+                            accept_ratio  = at_test[i_p]/100. 
+                            accept_adjust = (1. - self.autotune_strength) + self.autotune_strength*4.* accept_ratio
+                            p._draw_method.sigma *= accept_adjust
+                            info("Autotune: %i %6.4f %6.2f %6.2f"%(i_p, p._draw_method.sigma, accept_ratio, accept_adjust), I1)
+                        info('', I1)
+                        at_test[:] = 0.
+                        i_at = 0
+                    i_at  += 1
 
+                self.result.steps[chain, i_s, :] = P_cur[:]
+                self.result.chi[chain, i_s] = X_cur
 
                 ## DEBUGGING CODE
                 ## ==============
-                if i_s!=0 and i_s%150 == 0:
-                    print "%2i %5i"%(self.rank, i_s), self.result.get_acceptance()
+                if i_s!=0 and i_s%250 == 0:
+                    print "%2i %5i"%(mpi_rank, i_s), self.result.get_acceptance()
                     pl.figure(10, figsize=(20,20))
                     pl.clf()
                     for ip in range(self.n_parms):
@@ -187,25 +184,24 @@ class MCMC(object):
                         pl.plot(self.result.steps[0,:i_s,ip])
                         pl.subplot(self.n_parms,2,ip*2+2)
                         pl.hist(self.result.steps[0,:i_s,ip])
-                        pl.savefig('mcmcdebug_n%i.pdf'%self.rank)
+                        pl.savefig('mcmcdebug_n%i_%i.pdf'%(mpi_rank,chain))
 
         ## MPI communication
         ## =================
+        ## We do this the easy but slow way. Instead of using direct NumPy array transfer, we
+        ## pass the data as generic Python objects. This should be ok for now.
         if self.use_mpi:
-            if self.rank == 0:
-                for node in range(1, self.size):
-                    cs, ce = self.cm.recv(source=node, tag=11)
-                    for chain in range(cs, ce):
-                        logging.info('Master receiving node %i chain %i' %(node, chain+1))
-                        self.cm.Recv([self.result.steps[chain, :, :], MPI.DOUBLE], source=node, tag=77)
-                        self.cm.Recv([self.result.accepted[chain, :], MPI.DOUBLE], source=node, tag=77)
-            else:
-                self.cm.send((self.chain_start, self.chain_end), dest=0, tag=11)
-                for chain in range(self.n_chains):
-                    logging.info('Node %i sendind chain local:%3i  global:%3i' %(self.rank, chain+1, self.chain_start+chain+1))
-                    self.cm.Send([self.result.steps[chain,:,:], MPI.DOUBLE], dest=0, tag=77)
-                    self.cm.Send([self.result.accepted[chain, :], MPI.DOUBLE], dest=0, tag=77)
-        
+            result = MCMCResult(self.n_chains_g, self.n_steps, self.n_parms, self.p_names, self.p_descr)
+            result.steps    = mpi_comm.gather(self.result.steps)
+            result.chi      = mpi_comm.gather(self.result.chi)
+            result.accepted = mpi_comm.gather(self.result.accepted)
+
+            if is_root:
+                result.steps    = np.concatenate(result.steps)
+                result.chi      = np.concatenate(result.chi)
+                result.accepted = np.concatenate(result.accepted)
+                self.result = result
+            
         return self.result
 
     def get_results(self, parameter=None, burn_in=None, cor_len=None, separate_chains=False):
@@ -226,8 +222,6 @@ class MCMCResult(FitResult):
         self.chi      = np.zeros([n_chains, n_steps])
         self.accepted = np.zeros([n_chains, n_parms, 2])
 
-        
-        
         #self.get_results = self.__call__
 
     def __call__(self, parameter=None, burn_in=None, cor_len=None, separate_chains=False):
