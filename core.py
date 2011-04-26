@@ -53,10 +53,16 @@ except ImportError:
 try:
     from mpi4py import MPI
     with_mpi = True
+    mpi_comm = MPI.COMM_WORLD
+    mpi_rank = mpi_comm.Get_rank()
+    mpi_size = mpi_comm.Get_size()
+    is_root  = mpi_rank == 0
 except ImportError:
     logging.warning("Failed to load mpi4py: cannot use MPI.")
     with_mpi = False
-
+    mpi_rank = 0
+    mpi_size = 1
+    is_root = True
 
 class FitResult(object):
     def __init__(self): pass
