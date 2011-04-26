@@ -264,7 +264,7 @@ class MTFitParameterization(object):
         ldp_max = asarray(ldp_max) 
 
         ## TTV
-        ##
+        ## ===
         add_parameter(self.fit_ttv, 'ttv_a')
         add_parameter(self.fit_ttv, 'ttv_p')
 
@@ -346,6 +346,7 @@ class MTFitParameterization(object):
                                   [p['ttv a'].min_s] * count_parameter('ttv a'),
                                   [p['ttv p'].min_s] * count_parameter('ttv p')])
 
+
         self.p_max = concatenate([repeat(self.p_k_max[0], count_parameter('k2')),
                                   repeat(p['zp'].max_s,   count_parameter('zp')),
                                   [self.p_k_max[1]]     * count_parameter('tc'),
@@ -389,12 +390,11 @@ class MTFitParameterization(object):
         else:
             return True
 
+    ## Obtain the Kipping's transit width parameter and the semi-major axis using Kepler's third law
+    ## =============================================================================================
     def kipping_i(self, period, b2):
-        ## Obtain the Kipping's transit width parameter and the semi-major axis using Kepler's third law
-        ## =============================================================================================
         a = self.ac * (d_to_s*period)**(2/3)
         it = TWO_PI/period/asin(sqrt(1-b2)/(a*sin(acos(sqrt(b2)/a))))
-        #print it
         return it
 
 
@@ -529,7 +529,7 @@ class MTFitParameterization(object):
     def get_ttv(self, p_in=None):
         if p_in is not None: self.update(p_in)
         return [self.v_ttv_a, self.v_ttv_b] 
-    
+   
     def get_parameter_names(self):
         return self.fitted_parameter_names
 
