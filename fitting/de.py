@@ -155,7 +155,7 @@ class ParallelDiffEvol(DiffEvol):
         r = self.result
         t = np.zeros(3, np.int)
 
-        migrate = np.zeros(1, dtype=np.short)
+        migrate = False #np.zeros(1, dtype=np.short)
 
         for i in xrange(self.n_pop):
             r.fit[i] = self.minfun(r.pop[i,:])
@@ -188,11 +188,11 @@ class ParallelDiffEvol(DiffEvol):
                     
             ## -- migration --
             if self.rank == 0:
-                migrate[:] = self.migration_probability > random()
-            self.cm.Bcast(migrate, 0)
+                migrate = self.migration_probability > random()
+            migrate = self.cm.bcast(migrate)
             self.cm.Barrier()
             
-            if migrate[0]:
+            if migrate:
                 minidx = np.argmin(r.fitness)
                 rndidx = minidx
                 while rndidx == minidx:
@@ -201,10 +201,10 @@ class ParallelDiffEvol(DiffEvol):
                 sendid = (self.rank+1) % self.size
                 recvid = self.size-1 if self.rank == 0 else self.rank-1
                 
-                self.cm.Send(r.pop[minidx, :], sendid, 10)
-                self.cm.Recv(r.pop[rndidx, :], recvid, 10)
-                self.cm.Send(r.fitness[minidx:minidx+1], sendid, 10)
-                self.cm.Recv(r.fitness[rndidx:rndidx+1], recvid, 10)
+                self.cm.Send([r.pop[minidx, :], MPI.DOUBLE], sendid, 10)
+                self.cm.Recv([r.pop[rndidx, :], MPI.DOUBLE], recvid, 10)
+                self.cm.Send([r.fitness[minidx:minidx+1], MPI.DOUBLE], sendid, 10)
+                self.cm.Recv([r.fitness[rndidx:rndidx+1], MPI.DOUBLE], recvid, 10)
                 
             logging.info('Node %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min()))
 
