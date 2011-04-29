@@ -420,6 +420,7 @@ class MTFitParameterization(object):
         src += "  return %s\n" %self._generate_b2_str()
 
         exec(src)
+        self.get_b2_src = src
         self.get_b2 = MethodType(get_b2, self, MTFitParameterization)
 
         
@@ -476,8 +477,10 @@ class MTFitParameterization(object):
         src += "  if p_in is not None: self.update(p_in)\n"
         #src += "  print self.fitted_parameters[7], self.fitted_parameters[8]\n"
         #src += "  print %s\n  print\n" %self._generate_ld_str()        
-        src += "  return %s\n" %self._generate_ld_str()        
+        src += "  return %s\n" %self._generate_ld_str()
+        
         exec(src)
+        self.get_ldc_src = src
         self.get_ldc = MethodType(get_ldc, self, MTFitParameterization)
         
 
@@ -493,7 +496,9 @@ class MTFitParameterization(object):
                 src += "  return self.fitted_parameters[%i + tn*self.nch + ch]\n"%self.fitted_parameter_index['zp 0']
         else:
             src += "  return 1."
+
         exec(src)
+        self.get_zp_src = src
         self.get_zp = MethodType(get_zp, self, MTFitParameterization)
 
         
@@ -518,6 +523,7 @@ class MTFitParameterization(object):
         src += "  return p_out\n"
 
         exec(src)
+        self.get_kipping_src = src
         self.get_kipping = MethodType(get_kipping, self, MTFitParameterization)
 
 
@@ -537,4 +543,12 @@ class MTFitParameterization(object):
         return self.fitted_parameter_names
 
     def get_hard_limits(self):
+        return array([self.l_min, self.l_max])
+
+    @property
+    def parameter_descriptions(self):
+        return self.fitted_parameter_names
+
+    @property
+    def hard_limits(self):
         return array([self.l_min, self.l_max])
