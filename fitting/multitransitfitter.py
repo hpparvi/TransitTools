@@ -20,7 +20,11 @@ from time import time
 from cPickle import dump, load
 from math import acos, cos, sin, asin, sqrt
 
-from scipy.optimize import fmin
+try:
+    from scipy.optimize import fmin
+except ImportError:
+    do_local_fit = False
+    
 from numpy import array, linspace
 from matplotlib import pyplot as pl
 
