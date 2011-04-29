@@ -114,7 +114,13 @@ class SingleTransit(object):
         self.err[:]  = self.get_std(normalize=False)
         self.ivar[:] = 1./self.err**2
 
-
+        
+    def get_slope(self):
+        t, f = self.get_transit(mask_transit=True, cleaned=False, normalize=False)
+        fit = poly1d(polyfit(t-self.t_center,f,1))
+        self.dfdt = fit.coeffs[0] / fit.coeffs[1]
+        #print "% 7.2f"%(1e3*self.dfdt)
+        
     def plot_periodic_signal(self, fig=0):
         pl.figure(fig)
 
@@ -180,7 +186,7 @@ class MultiTransitLC(object):
         otime = np.abs(((time-tc+0.5*p)%p) - 0.5*p)
         phase = np.abs(((time-tc+0.5*p)%p) / p - 0.5)
         mask = otime < s if mtime else phase < s
-
+        
         self.fit_continuum = kwargs.get('fit_continuum', True)
         clean_pars = {'n_iter':15, 'top':5.0, 'top':15.0}
         if 'clean_pars' in kwargs.keys(): clean_pars.update(kwargs['clean_pars'])
@@ -228,7 +234,7 @@ class MultiTransitLC(object):
                                                        self.ivar[r1:r2],
                                                        self.tmask[r1:r2],
                                                        self.badpx_mask[r1:r2],
-                                                       i, self.tc+i*self.p, [r1,r2]))
+                                                       i, self.time[r1:r2].mean(), [r1,r2]))
                 else:
                     self.n_transits -= 1
             else:
@@ -236,6 +242,10 @@ class MultiTransitLC(object):
         info('Found %i good transits'%self.n_transits, I2)
         info('')
 
+        for t in self.transits:
+            t.get_slope()
+
+        #exit()
 
         ## Fit the per-transit continuum level
         ## -----------------------------------
@@ -406,6 +416,7 @@ class MultiTransitLC(object):
             ax1.axvline(t_0-0.1*self.s, c='0.0')
 
             ax1.text(0.02+0.2*i, 0.1, '%3i'%(tr.number+1), transform = ax1.transAxes)
+            ax1.text(0.02+0.2*i, 0.2, '%5.2f'%(1e3*tr.dfdt), transform = ax1.transAxes)
 
             if tr.continuum_fit is not None:
                 tt = np.linspace(tr.time[0], tr.time[-1], 200)
