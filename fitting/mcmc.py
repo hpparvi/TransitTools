@@ -16,7 +16,7 @@ import scipy.signal
 from cPickle import dump, load
 
 from math import exp, log, sqrt
-from numpy import pi, sin, arccos, asarray
+from numpy import pi, sin, arccos, asarray, concatenate
 from numpy.random import normal
 
 from transitLightCurve.core import *
@@ -85,11 +85,13 @@ class MCMC(object):
 
         self.chifun = chifun
         self.fitpar = self.chifun.parm
-        self.n_parms = self.fitpar.n_fitted_parameters
+        self.n_parms = self.fitpar.n_fitted_parameters + 1
+
+        self.n_points = concatenate(self.chifun.times).size
 
         self.parameters = []
-        self.p_names = self.fitpar.get_parameter_names()
-        self.p_descr = self.fitpar.get_parameter_descriptions()
+        self.p_names = concatenate([self.fitpar.get_parameter_names(), ['error scale']])
+        self.p_descr = concatenate([self.fitpar.get_parameter_descriptions(), ['Error scale']])
 
         try:
             for name, descr in zip(self.p_names, self.p_descr):
@@ -101,24 +103,44 @@ class MCMC(object):
             print "Error: no sigma given for parameter %s" %name
             sys.exit()
 
+            
         self.p0 = asarray([p.start_value for p in self.parameters])
         self.p  = self.p0.copy()
-
+        
         self.result = MCMCResult(self.n_chains_l, self.n_steps, self.n_parms, self.p_names, self.p_descr)
 
         acceptionTypes = {'ChiLikelihood':self._acceptStepChiLikelihood}
         self.acceptStep = acceptionTypes['ChiLikelihood']
 
 
-    def _acceptStepChiLikelihood(self, X0, Xt, prior_ratio):
-        if prior_ratio > 0.:
-            if X0-Xt > 200 or np.random.random() < prior_ratio * exp(0.5*(X0 - Xt)):
-                return True
-            else:
-                return False
+    def _acceptStepChiLikelihood(self, X0, Xt, prior_ratio, error_ratio):
+        """Decides whether we should accept the step or not based on the likelihood ratios.
+
+        Decides whether we should accept the step or not based on the ratio of the two given
+        likelihood values, ratio of priors and ratio of error scale parameters.
+
+        likelihood ratio = p1/p0 (b1/b0)^(n/2) exp(b0 ChiSqr0/2 - b1 ChiSqr1/2)        (1)
+
+                         = p1/p0 exp(n/2 log(b1/b0)) exp([b0 ChiSqr0 - b1 ChiSqr1]/2)  (2)
+
+                         = p1/p0 exp([n log(b1/b0) + b0 ChiSqr0 - b1 ChiSqr1]/2)       (3)
+
+        where p1 and p0 are the trial and current values of the prior, respectively, b1 and b0 the
+        error scale factors, n the number of data points, ChiSqr1 and ChiSqr0 the Chi^2 values. We
+        must make the transformation from (1) to (3) to increase numerical stability with large
+        datasets (such as CoRoT lightcurves). For example, raising any value to the 100000 power
+        directly would be a bit silly thing to do.
+        
+        Notes:
+          The likelihood ratios are supposed to be premultiplied by the error scale factor b.
+        """
+        if prior_ratio < 0: 
+            return False
+        elif np.random.random() < (prior_ratio*exp(0.5*( self.n_points*log(error_ratio) + X0 - Xt))):
+            return True
         else:
             return False
-    
+
 
     def __call__(self):
         """The main Markov Chain Monte Carlo routine in all its simplicity."""
@@ -129,7 +151,7 @@ class MCMC(object):
             logging.info('Starting node %2i  chain %2i  of %2i' %(mpi_rank, chain+1, self.n_chains_l))
             P_cur = self.p.copy()
             prior_cur = asarray([p.prior(P_cur[i]) for i, p in enumerate(self.parameters)])
-            X_cur = self.chifun(P_cur)
+            X_cur = self.chifun(P_cur[:-1])
 
             at_test = np.zeros(self.n_parms, dtype=np.int)
             
@@ -141,13 +163,14 @@ class MCMC(object):
                     for i_p, p in enumerate(self.parameters):
                         P_try[i_p] = p.draw(P_cur[i_p])
                         prior_try[i_p] = p.prior(P_try[i_p])
-                        X_try =  self.chifun(P_try)
+                        X_try =  self.chifun(P_try[:-1])
 
                         prior_ratio = prior_try.prod() / prior_cur.prod()
+                        error_ratio = P_try[-1] / P_cur[-1]
 
                         self.result.accepted[chain, i_p, 0] += 1
 
-                        if self.acceptStep(X_cur, X_try, prior_ratio):
+                        if X_try < 1e17 and self.acceptStep(P_cur[-1]*X_cur, P_try[-1]*X_try, prior_ratio, error_ratio):
                             P_cur[i_p] = P_try[i_p]
                             prior_cur[i_p] = prior_try[i_p]
                             X_cur = X_try
