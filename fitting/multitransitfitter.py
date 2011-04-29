@@ -15,6 +15,7 @@
 from __future__ import division
 import sys
 
+from copy import copy, deepcopy
 from time import time
 from cPickle import dump, load
 from math import acos, cos, sin, asin, sqrt
@@ -33,7 +34,7 @@ from fitparameterization import MTFitParameterization
 from fitnessfunction import FitnessFunction
 
 class MTFitResult(FitResult):
-    def __init__(self, fit_prm, res_ds, prm_ds, lcdata):
+    def __init__(self, fit_prm, fitfun, res_ds, prm_ds, lcdata):
         self.n_channels = fit_prm.nch
         self.channel_names = None
         self.ephemeris  = prm_ds.pv
@@ -43,13 +44,27 @@ class MTFitResult(FitResult):
         self.chi_sqr = None
         self.de_population = None
         self.de_fitness    = None
-
-        self.fitness_function = None
         
+        ## Shortcuts
+        ## =========
         self.nch = self.n_channels
         self.e   = self.ephemeris
         self.ldc = self.limb_darkening
         self.zp  = self.zeropoint
+
+        ## Save the parameterization
+        ## =========================
+        self.parameterization = copy(fit_prm)
+        self.parameterization.get_b2 = None
+        self.parameterization.get_ldc = None
+        self.parameterization.get_zp = None
+        self.parameterization.get_kipping = None
+        self.parameterization.map_p_to_k = None
+        self.parameterization.map_k_to_p = None
+
+        ## Save the fitness function
+        ## =========================
+        self.fitness_function = fitfun.fitfun_src
 
 
     def get_fit(self, ch=0):
@@ -207,4 +222,4 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
         info('')
 
     if is_root:
-        return MTFitResult(p, f_fn, p_fn, lcdata)
+        return MTFitResult(p, minfun, f_fn, p_fn, lcdata)

@@ -34,7 +34,7 @@ class FitnessFunction(object):
         method   = kwargs.get('method', 'fortran')
         npol     = kwargs.get('n_pol', 300)
         nthreads = kwargs.get('n_threads', 1)
-
+        
         self.lc = TransitLightcurve(TransitParameterization('kipping', [0.1,0,5,10,0]),
                                     method=method, ldpar=[0], zeropoint=1., n_threads=nthreads, npol=npol)
 
@@ -56,7 +56,7 @@ class FitnessFunction(object):
     def ttv_model(self, time, ch, tr, p_ttv):
         pk  = self.gk(ch)
         tc  = pk[2] * self.data[ch].transits[tr].number
-        ttv = p_ttv[0]*sin(p_ttv[1]*tc)
+        ttv = p_ttv[0]*sin(p_ttv[1]*tc*TWO_PI)
         return self.gz(ch,0) * self.lc(time + ttv, pk, self.gl(ch)) 
 
 
@@ -96,14 +96,11 @@ class FitnessFunction(object):
             addl(c, "    return chi")
         addl(c, "  else:")
         addl(c, "    return 1e18")
-
         code = ""
         for line in c: code += line
 
-        self.fitfun_code = code
-        #print code
-        #exit()
         exec(code)
+        self.fitfun_src = code
         self.fitfun = MethodType(fitfun, self, FitnessFunction)
 
 

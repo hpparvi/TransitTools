@@ -24,7 +24,7 @@ class MultiTransitMCMC(Fitter):
         self.p = MTFitParameterization(pars, stellar_prm, nchannels, lcdata[0].n_transits,
                                        initial_parameter_values = p0,
                                        **kwargs)
-        
+
         ## Setup the minimization function
         ## ================================
         self.fitfun = FitnessFunction(self.p, lcdata, **kwargs)
