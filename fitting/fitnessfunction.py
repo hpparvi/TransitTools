@@ -3,7 +3,7 @@ from types import MethodType
 from math import sin
 
 import numpy as np
-from numpy import asarray
+from numpy import asarray, array
 
 from transitLightCurve.core import *
 from transitLightCurve.transitlightcurve import TransitLightcurve
@@ -21,6 +21,7 @@ class FitnessFunction(object):
         self.gz = parm.get_zp
         self.gl = parm.get_ldc
         self.gt = parm.get_ttv
+        self.gb = parm.get_b2
 
         self.times  = [t.get_time()               for t in data]
         self.fluxes = [t.get_flux(normalize=True) for t in data]
@@ -32,9 +33,9 @@ class FitnessFunction(object):
             self.ivars[i] *= kwargs.get('ivar_multiplier', 1.)
 
         method   = kwargs.get('method', 'fortran')
-        npol     = kwargs.get('n_pol', 300)
+        npol     = kwargs.get('n_pol', 250)
         nthreads = kwargs.get('n_threads', 1)
-        
+
         self.lc = TransitLightcurve(TransitParameterization('kipping', [0.1,0,5,10,0]),
                                     method=method, ldpar=[0], zeropoint=1., n_threads=nthreads, npol=npol)
 
@@ -52,12 +53,18 @@ class FitnessFunction(object):
     def basic_model_str(self, time, ch, tr):
         return 'gz({ch},{tr}) * lc({time}, kp, ld))'.format(ch=ch, tr=tr, time=time)
 
+    def ttv_model_str(self, time, ch, tr):
+        src = []
+        src.append('    tc  = kp[2] * self.data[{ch}].transits[{tr}].number'.format(ch=ch,tr=tr))
+        src.append('    ttv = p_ttv[0]*sin(p_ttv[1]*tc*TWO_PI)')
+        src.append('    model = gz({ch},{tr}) * lc({time} + ttv, kp, ld)'.format(ch=ch,tr=tr, time=time))
+        return '\n'.join(src)
 
-    def ttv_model(self, time, ch, tr, p_ttv):
+    def ttv_model(self, time, ch, tr, p_ttv, ldc):
         pk  = self.gk(ch)
         tc  = pk[2] * self.data[ch].transits[tr].number
         ttv = p_ttv[0]*sin(p_ttv[1]*tc*TWO_PI)
-        return self.gz(ch,0) * self.lc(time + ttv, pk, self.gl(ch)) 
+        return self.gz(ch,0) * self.lc(time + ttv, pk, ldc) 
 
 
     def generate_fitfun_unroll(self):
@@ -68,32 +75,55 @@ class FitnessFunction(object):
         addl(c, "def fitfun(self, p_fit):")
         addl(c, "  self.parm.update(p_fit)")
         addl(c, "  if self.parm.is_inside_limits():")
-        addl(c, "    gz=self.gz; gk=self.gk; gl=self.gl; lc=self.lc")
-        addl(c, "    fl=self.fluxes; tm=self.times; iv=self.ivars; sl=self.slices; chi=0.")
+        addl(c, "    gz=self.gz; gk=self.gk; gl=self.gl; gb=self.gb; lc=self.lc")
+        addl(c, "    chi=0.")
+
         if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
-            for i in range(len(self.data)):
-                if i>0: addl(c, "    if not np.all(asarray(self.gl({0})) > asarray(self.gl({1}))): return 1e18".format(i, i-1))
+            if self.parm.separate_ld:
+                for i in range(len(self.data)):
+                    if i>0: addl(c, "    if not np.all(asarray(self.gl({0})) > asarray(self.gl({1}))): return 1e18".format(i, i-1))
 
             for i in range(len(self.data)):
                 addl(c, "    chi += ((fl[{0}] - self.basic_model(tm[{0}], {0}, 0))**2 * iv[{0}]).sum()".format(i))
             addl(c, "    return chi")
         else:
+            if self.parm.separate_ld:
+                for i in range(len(self.data)):
+                    if i>0: addl(c, "    if not np.all(asarray(self.gl({0})) > asarray(self.gl({1}))): return 1e18".format(i, i-1))
+            else:
+                addl(c, "    ld = gl(); b2 = gb()")
+                addl(c, "    if ld[0] < 0. or ld[0] > 1.: return 1e18")
+                addl(c, "    if b2 < 0. or b2 > 1.: return 1e18")
+
             if self.parm.fit_ttv:
                 addl(c, "    p_ttv = self.gt()")
-
+       
+            if not self.parm.separate_k2_ch:
+                addl(c, '    kp=gk()')
+                    
             for i in range(len(self.data)):
-                if i>0: addl(c, "    if not np.all(asarray(self.gl({0})) > asarray(self.gl({1}))): return 1e18".format(i, i-1))
+                if not self.parm.separate_zp_tr:
+                    addl(c, '    zp = gz({})'.format(i))
+                    zp_str = 'zp'
 
-            for i in range(len(self.data)):
-                addl(c, "\n    kp=gk({0}); ld=gl({0}); fl=self.fluxes[{0}]; tm=self.times[{0}]; iv=self.ivars[{0}]".format(i))
+                if self.parm.separate_k2_ch: addl(c, '    kp=gk({0})'.format(i))
+                if self.parm.separate_ld: addl(c, '    ld=gl({0})'.format(i))
+                addl(c, "\n    fl=self.fluxes[{0}]; tm=self.times[{0}]; iv=self.ivars[{0}]".format(i))
+                if self.parm.fit_ttv:
+                    addl(c, '    tc  = kp[2] * array([t.number for t in self.data[{ch}].transits])'.format(ch=i))
+                    addl(c, '    ttv = p_ttv[0]*np.sin(p_ttv[1]*TWO_PI*tc)')
+
                 for tr, sl in enumerate(self.slices[i]):
+                    if self.parm.separate_zp_tr: zp_str = 'gz({ch},{tr})'.format(ch=i, tr=tr)
                     if self.parm.fit_ttv:
-                        addl(c, "    chi += ((fl[{1}] - self.ttv_model(tm[{1}], {0}, {2}, p_ttv))**2 * iv[{1}]).sum()".format(
-                                i, str(sl.start)+':'+str(sl.stop), tr))
+                        slice_str = '{0:5d}:{1:5d}'.format(sl.start, sl.stop)
+                        model_str = '{zp}*lc(tm[{time}] + ttv[{tr}], kp, ld)'.format(zp=zp_str, ch=i, tr=tr, time=slice_str)
+                        addl(c, "    chi += ((fl[{time}] - {model})**2 * iv[{time}]).sum()".format(time=slice_str, model=model_str))
                     else:
                         model_str = self.basic_model_str('tm[{}]'.format(str(sl.start)+':'+str(sl.stop)), i, tr)
                         addl(c, "    chi += ((fl[{1}] - {0})**2 * iv[{1}]).sum()".format(model_str, str(sl.start)+':'+str(sl.stop)))
-            addl(c, "    return chi")
+
+            addl(c, "\n    return chi")
         addl(c, "  else:")
         addl(c, "    return 1e18")
         code = ""
@@ -102,7 +132,6 @@ class FitnessFunction(object):
         exec(code)
         self.fitfun_src = code
         self.fitfun = MethodType(fitfun, self, FitnessFunction)
-
 
     def generate_fitfun(self):
         """Generates a fitness function based on given fit parameterization.
