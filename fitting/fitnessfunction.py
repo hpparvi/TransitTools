@@ -1,9 +1,16 @@
 import sys
 from types import MethodType
 from math import sin
+from timeit import timeit
 
 import numpy as np
 from numpy import asarray, array
+
+try:
+    import numexpr as ne
+    with_numexpr = False #True
+except ImportError:
+    with_numexpr = False
 
 from transitLightCurve.core import *
 from transitLightCurve.transitlightcurve import TransitLightcurve
@@ -29,6 +36,12 @@ class FitnessFunction(object):
         self.pntns  = [t.pntn                     for t in data]
         self.slices = [t.get_transit_slices()     for t in data]
  
+        self.tnumbs = []
+        for i, ch in enumerate(self.data):
+            self.tnumbs.append(np.zeros(ch.time.size))
+            for sl, tn in zip(self.slices[i], [t.number for t in ch.transits]):
+                self.tnumbs[i][sl] = tn
+
         for i in range(len(self.ivars)):
             self.ivars[i] *= kwargs.get('ivar_multiplier', 1.)
 
@@ -76,6 +89,11 @@ class FitnessFunction(object):
         addl(c, "  self.parm.update(p_fit)")
         addl(c, "  if self.parm.is_inside_limits():")
         addl(c, "    gz=self.gz; gk=self.gk; gl=self.gl; gb=self.gb; lc=self.lc")
+        addl(c, "    fl=self.fluxes; tm=self.times; iv=self.ivars; tn=self.tnumbs")
+        if with_numexpr:
+            for i in range(len(self.data)):
+                addl(c, '    fl_{ch}=fl[{ch}]; tm_{ch}=tm[{ch}]; iv_{ch} = iv[{ch}]; tn_{ch} = tn[{ch}]'.format(ch=i))
+
         addl(c, "    chi=0.")
 
         if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
@@ -96,39 +114,44 @@ class FitnessFunction(object):
                 addl(c, "    if b2 < 0. or b2 > 1.: return 1e18")
 
             if self.parm.fit_ttv:
-                addl(c, "    p_ttv = self.gt()")
-       
+                addl(c, "    p_ttv = self.gt(); ttv_a = p_ttv[0]; ttv_p = p_ttv[1]")
+
             if not self.parm.separate_k2_ch:
-                addl(c, '    kp=gk()')
-                    
-            for i in range(len(self.data)):
+                addl(c, '    kp=gk(); period=kp[2]')
+            else:
+                raise NotImplementedError
+
+            ## Loop over all channels
+            for ch in range(len(self.data)):
+                addl(c,'')
                 if not self.parm.separate_zp_tr:
-                    addl(c, '    zp = gz({})'.format(i))
-                    zp_str = 'zp'
+                    zp_str = 'gz({})'.format(ch)
 
-                if self.parm.separate_k2_ch: addl(c, '    kp=gk({0})'.format(i))
-                if self.parm.separate_ld: addl(c, '    ld=gl({0})'.format(i))
-                addl(c, "\n    fl=self.fluxes[{0}]; tm=self.times[{0}]; iv=self.ivars[{0}]".format(i))
+                if self.parm.separate_k2_ch: addl(c, '    kp=gk({0})'.format(ch))
+                if self.parm.separate_ld: addl(c, '    ld=gl({0})'.format(ch))
+
                 if self.parm.fit_ttv:
-                    addl(c, '    tc  = kp[2] * array([t.number for t in self.data[{ch}].transits])'.format(ch=i))
-                    addl(c, '    ttv = p_ttv[0]*np.sin(p_ttv[1]*TWO_PI*tc)')
-
-                for tr, sl in enumerate(self.slices[i]):
-                    if self.parm.separate_zp_tr: zp_str = 'gz({ch},{tr})'.format(ch=i, tr=tr)
-                    if self.parm.fit_ttv:
-                        slice_str = '{0:5d}:{1:5d}'.format(sl.start, sl.stop)
-                        model_str = '{zp}*lc(tm[{time}] + ttv[{tr}], kp, ld)'.format(zp=zp_str, ch=i, tr=tr, time=slice_str)
-                        addl(c, "    chi += ((fl[{time}] - {model})**2 * iv[{time}]).sum()".format(time=slice_str, model=model_str))
+                    if with_numexpr:
+                        zp_str = 'zp'
+                        addl(c, '    tn_{ch:d} = tn[{ch:d}]; zp = gz({ch})'.format(ch=ch))
+                        addl(c, '    tm_t  = ne.evaluate("tm_{ch} + ttv_a*sin( TWO_PI*ttv_p * period*tn_{ch:d} )")'.format(ch=ch))
+                        addl(c, '    model = lc(tm_t, kp, ld)'.format(ch=ch))
+                        addl(c, '    chi  += ne.evaluate("sum((fl_{ch} - {zp}*model)**2 * iv_{ch})")'.format(ch=ch,zp=zp_str))
                     else:
-                        model_str = self.basic_model_str('tm[{}]'.format(str(sl.start)+':'+str(sl.stop)), i, tr)
-                        addl(c, "    chi += ((fl[{1}] - {0})**2 * iv[{1}]).sum()".format(model_str, str(sl.start)+':'+str(sl.stop)))
+                        addl(c, '    ttv = ttv_a*np.sin( TWO_PI*ttv_p * period*tn[{ch}] )'.format(ch=ch))
+                        addl(c, '    chi += ((fl[{ch}] - {zp}*lc(tm[{ch}] + ttv, kp, ld))**2 * iv[{ch}]).sum()'.format(ch=ch,zp=zp_str))
+                else:
+                    raise NotImplementedError
+                #     else:
+                #         model_str = self.basic_model_str('tm[{}]'.format(str(sl.start)+':'+str(sl.stop)), i, tr)
+                #         addl(c, "    chi += ((fl[{1}] - {0})**2 * iv[{1}]).sum()".format(model_str, str(sl.start)+':'+str(sl.stop)))
 
             addl(c, "\n    return chi")
         addl(c, "  else:")
         addl(c, "    return 1e18")
         code = ""
         for line in c: code += line
-
+        print code; #exit()
         exec(code)
         self.fitfun_src = code
         self.fitfun = MethodType(fitfun, self, FitnessFunction)
