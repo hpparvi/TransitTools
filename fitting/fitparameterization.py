@@ -265,8 +265,8 @@ class MTFitParameterization(object):
 
         ## TTV
         ## ===
-        add_parameter(self.fit_ttv, 'ttv_a')
-        add_parameter(self.fit_ttv, 'ttv_p')
+        add_parameter(self.fit_ttv, 'ttv a')
+        add_parameter(self.fit_ttv, 'ttv p')
 
         self.fitted_parameter_names = array(self.fitted_parameter_names)
         self.fitted_parameters = zeros(self.fitted_parameter_names.size)
@@ -334,7 +334,6 @@ class MTFitParameterization(object):
         if not self.fit_zeropoint:
             self.constant_parameters[self.constant_parameter_names=='zp'] = 1.
 
-
         ## Setup the soft parameter limits
         ## ===============================
         self.p_min = concatenate([repeat(self.p_k_min[0], count_parameter('k2')),
@@ -343,9 +342,8 @@ class MTFitParameterization(object):
                                   [self.p_k_min[2]]     * count_parameter('p'),
                                   [p['it'].min_s] if self.fit_transit_width else [],
                                   ldp_min,
-                                  [p['ttv a'].min_s] * count_parameter('ttv a'),
-                                  [p['ttv p'].min_s] * count_parameter('ttv p')])
-
+                                  [p['ttv a'].min_s] if self.fit_ttv else [],
+                                  [p['ttv p'].min_s] if self.fit_ttv else []])
 
         self.p_max = concatenate([repeat(self.p_k_max[0], count_parameter('k2')),
                                   repeat(p['zp'].max_s,   count_parameter('zp')),
@@ -353,9 +351,9 @@ class MTFitParameterization(object):
                                   [self.p_k_max[2]]     * count_parameter('p'),
                                   [p['it'].max_s] if self.fit_transit_width else [],
                                   ldp_max,
-                                  [p['ttv a'].max_s]    * count_parameter('ttv a'),
-                                  [p['ttv p'].max_s]    * count_parameter('ttv p')])
-
+                                  [p['ttv a'].max_s] if self.fit_ttv else [],
+                                  [p['ttv p'].max_s] if self.fit_ttv else []])
+        
         ## Setup the hard parameter limits 
         ## ================================
         self.l_min = concatenate([repeat(0.0, count_parameter('k2')),
@@ -364,8 +362,8 @@ class MTFitParameterization(object):
                                   [0.0]    *  count_parameter('p'),
                                   [0.0] if self.fit_transit_width else [],
                                   ldp_min,
-                                  [-1.]    * count_parameter('ttv a'),
-                                  [1.]     * count_parameter('ttv p')])
+                                  [-1.]    if self.fit_ttv else [],
+                                  [1.]     if self.fit_ttv else []])
 
         self.l_max = concatenate([repeat(0.1, count_parameter('k2')),
                                   repeat(1.1, count_parameter('zp')),
@@ -373,8 +371,8 @@ class MTFitParameterization(object):
                                   [1e10]   *  count_parameter('p'),
                                   [5e04] if self.fit_transit_width else [],
                                   ldp_max,
-                                  [1.]     * count_parameter('ttv a'),
-                                  [1e10]   * count_parameter('ttv p')])
+                                  [1.]     if self.fit_ttv else [],
+                                  [1e10]   if self.fit_ttv else []])
 
         self.p_cur[:] = vstack([self.p_min, self.p_max]).mean(0)
 
@@ -475,10 +473,8 @@ class MTFitParameterization(object):
     def _generate_ld_getter(self):
         src  = "def get_ldc(self, ch=0, tn=0, p_in=None):\n"
         src += "  if p_in is not None: self.update(p_in)\n"
-        #src += "  print self.fitted_parameters[7], self.fitted_parameters[8]\n"
-        #src += "  print %s\n  print\n" %self._generate_ld_str()        
         src += "  return %s\n" %self._generate_ld_str()
-        
+
         exec(src)
         self.get_ldc_src = src
         self.get_ldc = MethodType(get_ldc, self, MTFitParameterization)
@@ -534,7 +530,7 @@ class MTFitParameterization(object):
 
     def get_ttv(self, p_in=None):
         if p_in is not None: self.update(p_in)
-        return [self.v_ttv_a, self.v_ttv_b] 
+        return [self.parameter_view['ttv a'], self.parameter_view['ttv p']] 
    
     def get_parameter_names(self):
         return self.fitted_parameter_names
