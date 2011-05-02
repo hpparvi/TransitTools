@@ -12,6 +12,7 @@ Date
 from __future__ import division
 
 import logging
+import curses
 
 from numpy import pi as PI
 from numpy import double as DOUBLE
@@ -91,3 +92,19 @@ def info(msg, style=10):
         logging.info(4*' '+msg)
     else:
         logging.info(msg)
+
+class CTitleWindow(object):
+    def __init__(self, title, width, height, xpos, ypos):
+        self.window = curses.newwin(height, width, ypos, xpos)
+        self.window.box()
+        self.window.addstr(0,2, ' %s '%title)
+        self.window.refresh()
+        self.title = title
+        self.widht = width
+        self.height = height
+
+    def addstr(self, *args):
+        self.window.addstr(*args)
+        self.window.refresh()
+        
+    def refresh(self) : self.window.refresh()

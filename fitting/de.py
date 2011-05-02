@@ -112,6 +112,7 @@ class DiffEvol(object):
         if self.use_mpi:
             self._gather_populations()
 
+        self.result.minidx = np.argmin(r.fitness)
         return self.result
 
 
@@ -136,8 +137,6 @@ class DiffEvol(object):
                 self.cm.Send([r.pop[:, :], MPI.DOUBLE], dest=0, tag=77)
                 self.cm.Send([r.fit[:], MPI.DOUBLE], dest=0, tag=77)
                 
-        self.result.minidx = np.argmin(r.fitness)
-
 
 class ParallelDiffEvol(DiffEvol):
     """
@@ -300,7 +299,8 @@ class DiffEvolResult(FitResult):
         self.fitness    = np.zeros(npop)
         self.pop        = self.population
         self.fit        = self.fitness
-
+        self.minidx     = None
+        
     def get_fitness(self):
         """Returns the best-fit value of the minimized function."""
         return self.fitness[self.minidx]

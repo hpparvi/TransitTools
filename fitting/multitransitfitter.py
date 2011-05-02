@@ -202,7 +202,7 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
             ldc_de  = p.get_ldc(chn, f_de)
             ldc_fn  = p.get_ldc(chn, f_fn)
             if p.n_ldc == 1:
-                info("%14.5f %14.5f  -  limb darkening ch %i u"%(ldc_de, ldc_fn, chn), I1)
+                info("%14.5f %14.5f  -  limb darkening ch %i u"%(ldc_de[0], ldc_fn[0], chn), I1)
             if p.n_ldc == 2:
                 info(" % 5.3f % 5.3f  % 5.3f % 5.3f  -  limb darkening ch %i u v"%(ldc_de[0], ldc_de[1], ldc_fn[0], ldc_fn[1], chn), I1)
 
@@ -211,7 +211,7 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
             p_ttv_fn = p.get_ttv(f_fn)
 
             info("%14.5f %14.5f  -  TTV amplitude [min]"%(p_ttv_de[0]*1440, p_ttv_fn[0]*1440), I1)
-            info("%14.5f %14.5f  -  TTV period [d]"%(p_ttv_de[1]/TWO_PI, p_ttv_fn[1]/TWO_PI), I1)
+            info("%14.5f %14.5f  -  TTV period [d]"%(p_ttv_de[1], p_ttv_fn[1]), I1)
 
 
         info('Best-fit fitting parameters',H2)

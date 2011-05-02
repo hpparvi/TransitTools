@@ -24,7 +24,6 @@ class Gimenez(TransitModel):
             import gimenez_f
             self.shape = gimenez_f.gimenez.c_gimenez
 
-
     def __call__(self, z, r, u=[], n_threads=0):
         return self.shape(z, r, u, self.npol, self.zeropoint, self.n_threads)
 
