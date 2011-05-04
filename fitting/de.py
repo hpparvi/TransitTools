@@ -105,7 +105,7 @@ class DiffEvol(object):
     
                 if ufit < r.fitness[i]:
                     r.pop[i,:] = u[:].copy()
-                    r.fit[i]   = ufit.copy()
+                    r.fit[i]   = ufit
                             
             logging.info('Node %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min()))
         

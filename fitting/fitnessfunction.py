@@ -4,7 +4,7 @@ from math import sin
 from timeit import timeit
 
 import numpy as np
-from numpy import asarray, array
+from numpy import asarray, array, concatenate, zeros, zeros_like, add
 
 try:
     import numexpr as ne
@@ -16,6 +16,10 @@ from transitLightCurve.core import *
 from transitLightCurve.transitlightcurve import TransitLightcurve
 from transitLightCurve.transitparameterization import TransitParameterization
 
+import fitnessfunction_f as ff
+calculate_time_with_ttv = ff.fitnessfunction.calculate_time_with_ttv
+chi_sqr = ff.fitnessfunction.chi_sqr
+
 def addl(code, cdl):
     code.append(cdl+'\n')
 
@@ -23,6 +27,7 @@ class FitnessFunction(object):
     def __init__(self, parm, data, **kwargs):
         self.parm = parm
         self.data = data
+        self.nch  = len(data)
 
         self.gk = parm.get_kipping
         self.gz = parm.get_zp
@@ -35,12 +40,22 @@ class FitnessFunction(object):
         self.ivars  = [t.get_ivar(normalize=True) for t in data]
         self.pntns  = [t.pntn                     for t in data]
         self.slices = [t.get_transit_slices()     for t in data]
- 
+        self.lengths= array([t.size for t in self.times])
+
         self.tnumbs = []
         for i, ch in enumerate(self.data):
             self.tnumbs.append(np.zeros(ch.time.size))
             for sl, tn in zip(self.slices[i], [t.number for t in ch.transits]):
                 self.tnumbs[i][sl] = tn
+
+        self.atimes  = concatenate(self.times)
+        self.afluxes = concatenate(self.fluxes)
+        self.aivars  = concatenate(self.ivars)
+        self.atnumbs = concatenate(self.tnumbs)
+
+        self.ttv     = zeros_like(self.atimes) 
+        self.atmp    = zeros_like(self.atimes) 
+        self.mtmp    = zeros_like(self.atimes)
 
         for i in range(len(self.ivars)):
             self.ivars[i] *= kwargs.get('ivar_multiplier', 1.)
@@ -88,8 +103,8 @@ class FitnessFunction(object):
         addl(c, "def fitfun(self, p_fit):")
         addl(c, "  self.parm.update(p_fit)")
         addl(c, "  if self.parm.is_inside_limits():")
-        addl(c, "    gz=self.gz; gk=self.gk; gl=self.gl; gb=self.gb; lc=self.lc")
-        addl(c, "    fl=self.fluxes; tm=self.times; iv=self.ivars; tn=self.tnumbs")
+        addl(c, "    gz=self.gz; gk=self.gk; gl=self.gl; gb=self.gb; lc=self.lc; ttv=self.ttv; atmp=self.atmp; mtmp=self.mtmp")
+        addl(c, "    fl=self.afluxes; tm=self.atimes; iv=self.aivars; tn=self.atnumbs")
         if with_numexpr:
             for i in range(len(self.data)):
                 addl(c, '    fl_{ch}=fl[{ch}]; tm_{ch}=tm[{ch}]; iv_{ch} = iv[{ch}]; tn_{ch} = tn[{ch}]'.format(ch=i))
@@ -122,7 +137,7 @@ class FitnessFunction(object):
                 raise NotImplementedError
 
             ## Loop over all channels
-            for ch in range(len(self.data)):
+            for ch in range(1): #range(len(self.data)):
                 addl(c,'')
                 if not self.parm.separate_zp_tr:
                     zp_str = 'gz({})'.format(ch)
@@ -138,14 +153,20 @@ class FitnessFunction(object):
                         addl(c, '    model = lc(tm_t, kp, ld)'.format(ch=ch))
                         addl(c, '    chi  += ne.evaluate("sum((fl_{ch} - {zp}*model)**2 * iv_{ch})")'.format(ch=ch,zp=zp_str))
                     else:
-                        addl(c, '    ttv = ttv_a*np.sin( TWO_PI*ttv_p * period*tn[{ch}] )'.format(ch=ch))
-                        addl(c, '    chi += ((fl[{ch}] - {zp}*lc(tm[{ch}] + ttv, kp, ld))**2 * iv[{ch}]).sum()'.format(ch=ch,zp=zp_str))
+                        #addl(c, '    ttv = ttv_a*np.sin( TWO_PI*ttv_p * period*tn[{ch}] )'.format(ch=ch))
+                        #addl(c, '    chi += ((fl[{ch}] - {zp}*lc(tm[{ch}] + ttv, kp, ld))**2 * iv[{ch}]).sum()'.format(ch=ch,zp=zp_str))
+                        addl(c, '    atmp[:] = calculate_time_with_ttv(ttv_a, ttv_p, period, tm, tn)')
+                        #addl(c, '    ttv[:] = ne.evaluate("ttv_a*sin( TWO_PI*ttv_p * period*tn)")')
+                        #addl(c, '    add(tm, ttv, atmp)')
+                        addl(c, '    mtmp[:] = lc(atmp, kp, ld)')
+                        addl(c, '    chi = chi_sqr(fl, mtmp, iv)') # ne.evaluate("sum((fl - mtmp)**2 * iv)")')
+                        #addl(c, '    chi += ((fl - mtmp)**2 * iv).sum()')
+
                 else:
                     raise NotImplementedError
                 #     else:
                 #         model_str = self.basic_model_str('tm[{}]'.format(str(sl.start)+':'+str(sl.stop)), i, tr)
                 #         addl(c, "    chi += ((fl[{1}] - {0})**2 * iv[{1}]).sum()".format(model_str, str(sl.start)+':'+str(sl.stop)))
-
             addl(c, "\n    return chi")
         addl(c, "  else:")
         addl(c, "    return 1e18")
