@@ -44,6 +44,7 @@ module gimenez
 
   real(8), allocatable, dimension(:,:) :: a_e_nm1, a_e_nm2, a_e_vl1
   real(8), allocatable, dimension(:,:,:) :: j_d, j_e
+  real(8), allocatable, dimension(:) :: tmp1d1, tmp1d2
   integer :: init_n = 0
 
   procedure (), pointer :: p
@@ -60,10 +61,13 @@ contains
     if (allocated(a_e_vl1)) deallocate(a_e_vl1)
     if (allocated(j_d)) deallocate(j_d)
     if (allocated(j_e)) deallocate(j_e)
+    if (allocated(tmp1d1)) deallocate(tmp1d1)
+    if (allocated(tmp1d2)) deallocate(tmp1d2)
 
     allocate(a_e_nm1(npol, nldc+1), a_e_nm2(npol, nldc+1), a_e_vl1(npol, nldc+1))
     allocate(j_d(4, npol, nldc+1), j_e(4, npol, nldc+1))
- 
+    allocate(tmp1d1(1000000), tmp1d2(1000000))
+
     do j=1,nldc+1
        nu = (real(j-1,8)+2._fd)/2._fd
        do i = 0, npol-1
@@ -113,16 +117,19 @@ contains
     real(8), intent(in) :: r, t0, p, a, i
     real(8), intent(out), dimension(nt) :: res
 
-    real(8), dimension(nt) :: dt, ph, z, s
     real(8) :: p_inv
+    integer :: j
 
     p_inv = 1._fd/p
-    dt = t - t0
-    ph = dt*p_inv
-    s = sign(1._fd, -(mod(ph + 0.25_fd, 1._fd) - 0.5_fd))
-    ph = 6.28318*ph
-    z = s*a*sqrt(sin(ph)**2 + (cos(i)*cos(ph))**2)
-    call eval(z, r, u, npol, 1._fd, nthreads, nt, nu, res)
+    !$omp parallel do private(i) shared(tmp1d1, tmp1d2, t, t0, p_inv)
+    do j=1,nt
+       tmp1d1(j) = (t(j)-t0)*p_inv                                          !phase -1 -- 1
+       tmp1d2(j) = sign(1._fd, -(mod(tmp1d1(j) + 0.25_fd, 1._fd) - 0.5_fd)) !sign
+       tmp1d1(j) = 6.28318*tmp1d1(j)                                        !phase -2pi -- 2pi
+       tmp1d1(j) = tmp1d2(j)*a*sqrt(sin(tmp1d1(j))**2 + (cos(i)*cos(tmp1d1(j)))**2) !projected distance z
+    end do
+    !$omp end parallel do
+    call eval(tmp1d1(1:nt), r, u, npol, 1._fd, nthreads, nt, nu, res)
   end subroutine eval_t
 
   subroutine eval(z, r, u, npol, zeropoint, nt, nz, nu, res)
@@ -140,7 +147,7 @@ contains
     real(8) :: t_start, t_finish
 
     !t_start = mpi_wtime()
-    !$ if (nt /= 0) call omp_set_num_threads(nt)
+    ! $ if (nt /= 0) call omp_set_num_threads(nt)
 
     res  = 0._fd
     mask = (z > 0._fd) .and. (z < 1._fd+r)
@@ -180,7 +187,7 @@ contains
     c  = z/(1._fd+r)
     
     do j=1,size(u)+1
-       a(:,j) = alpha(b, c, j-1, npol)
+       call alpha(b, c, j-1, npol, a(:,j))
     end do
 
     if (size(u) > 0) then
@@ -195,16 +202,15 @@ contains
   
   !!--- Alpha ---
   !!
-  function alpha(b, c, n, npol)
+  subroutine alpha(b, c, n, npol, a)
     implicit none
     real(8), intent(in), dimension(:) :: b, c
     integer, intent(in) :: n, npol
-    real(8), dimension(size(c)) :: alpha
+    real(8), dimension(size(c)), intent(out) :: a
 
     real(8), dimension(size(c)) :: norm, vl, sm
     real(8), dimension(size(b), npol) :: e
     real(8), dimension(size(c), npol) :: d
-
 
     real(8) :: nu
     integer :: i
@@ -219,22 +225,22 @@ contains
     call jacobi(npol,    nu,    1._fd, 1._fd-2._fd*(1._fd-b), n+1, j_e, e)
     
     sm = 0._fd
-    !$omp parallel default(none) private(i,vl) shared(alpha,a_e_nm1,a_e_nm2,a_e_vl1,npol,nu,b,c,d,e,sm,norm,n)
+    !$omp parallel default(none) private(i,vl) shared(a,a_e_nm1,a_e_nm2,a_e_vl1,npol,nu,b,c,d,e,sm,norm,n)
     !$omp do &
-    !$omp schedule(dynamic, 500) &
+    !$omp schedule(static) &
     !$omp reduction(+:sm)
     do i = 1, npol
        e(1,i) = e(1,i) * a_e_nm2(i,n+1)
        sm  = sm + (a_e_vl1(i,n+1) * d(:,i) * e(1,i)**2)
     end do
     !$omp end do
-
+       
     !$omp workshare
-    alpha = norm * sm
+    a = norm * sm
     !$omp end workshare
 
     !$omp end parallel
-  end function alpha
+  end subroutine alpha
 
   !!--- Jacobi polynomials ---
   !!
