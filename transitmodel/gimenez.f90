@@ -36,44 +36,39 @@
 module gimenez
   use, intrinsic :: ISO_C_BINDING
   implicit none
-
-  include "mpif.h"
+  !include "mpif.h"
 
   integer, parameter :: FS = C_FLOAT
   integer, parameter :: FD = C_DOUBLE
 
-  real(8), allocatable, dimension(:,:) :: a_e_nm1, a_e_nm2, a_e_vl1
+  real(8), allocatable, dimension(:,:) :: a_e_nm, a_e_vl
   real(8), allocatable, dimension(:,:,:) :: j_d, j_e
   real(8), allocatable, dimension(:) :: tmp1d1, tmp1d2
-  integer :: init_n = 0
-
-  procedure (), pointer :: p
 
 contains
   subroutine init(npol, nldc)
     implicit none
     integer, intent(in) :: npol, nldc
     integer :: i, j
-    real(8) :: nu
+    real(8) :: nu, nm1
 
-    if (allocated(a_e_nm1)) deallocate(a_e_nm1)
-    if (allocated(a_e_nm2)) deallocate(a_e_nm2)
-    if (allocated(a_e_vl1)) deallocate(a_e_vl1)
+    if (allocated(a_e_nm)) deallocate(a_e_nm)
+    if (allocated(a_e_vl)) deallocate(a_e_vl)
     if (allocated(j_d)) deallocate(j_d)
     if (allocated(j_e)) deallocate(j_e)
     if (allocated(tmp1d1)) deallocate(tmp1d1)
     if (allocated(tmp1d2)) deallocate(tmp1d2)
 
-    allocate(a_e_nm1(npol, nldc+1), a_e_nm2(npol, nldc+1), a_e_vl1(npol, nldc+1))
+    allocate(a_e_nm(npol, nldc+1), a_e_vl(npol, nldc+1))
     allocate(j_d(4, npol, nldc+1), j_e(4, npol, nldc+1))
     allocate(tmp1d1(1000000), tmp1d2(1000000))
 
     do j=1,nldc+1
        nu = (real(j-1,8)+2._fd)/2._fd
        do i = 0, npol-1
-          a_e_nm1(i+1, j) = exp(log_gamma(nu+i+1._fd) - log_gamma(i+2._fd))
-          a_e_nm2(i+1, j) = exp(log_gamma(i+1._fd) + log_gamma(nu+1._fd) - log_gamma(i+1._fd+nu))
-          a_e_vl1(i+1, j) = (-1)**(i) * (2._fd+2._fd*i+nu) * a_e_nm1(i+1, j)
+          nm1 = exp(log_gamma(nu+i+1._fd) - log_gamma(i+2._fd))
+          a_e_vl(i+1, j) = (-1)**(i) * (2._fd+2._fd*i+nu) * nm1
+          a_e_nm(i+1, j) = exp(log_gamma(i+1._fd) + log_gamma(nu+1._fd) - log_gamma(i+1._fd+nu))
        end do
     end do
 
@@ -101,14 +96,13 @@ contains
 
   subroutine finalize()
     implicit none
-    if (allocated(a_e_nm1)) deallocate(a_e_nm1)
-    if (allocated(a_e_nm2)) deallocate(a_e_nm2)
-    if (allocated(a_e_vl1)) deallocate(a_e_vl1)
+    if (allocated(a_e_nm)) deallocate(a_e_nm)
+    if (allocated(a_e_vl)) deallocate(a_e_vl)
     if (allocated(j_d)) deallocate(j_d)
     if (allocated(j_e)) deallocate(j_e)
   end subroutine finalize
 
-  subroutine eval_t(t, r, u, npol, t0, p, a, i, nthreads, nt, nu, res)
+  subroutine eval_t_d(t, r, u, npol, t0, p, a, i, nthreads, nt, nu, res)
     use omp_lib
     implicit none
     integer, intent(in) :: nt, nu, nthreads, npol
@@ -117,22 +111,30 @@ contains
     real(8), intent(in) :: r, t0, p, a, i
     real(8), intent(out), dimension(nt) :: res
 
+    real(8), dimension(nt) :: dt, ph, sn, z
+
     real(8) :: p_inv
     integer :: j
 
+    !! Calculate the phase given time, zero epoch, and orbital parameters for a circular orbit.
+    !!
+    !! Note: currently assumes zero eccentricity, an implementation with nonzero eccentricity
+    !!       is needed as well.
+    !!
     p_inv = 1._fd/p
-    !$omp parallel do private(i) shared(tmp1d1, tmp1d2, t, t0, p_inv)
+    !$omp parallel do private(j) shared(tmp1d1, tmp1d2, a, i, t, t0, p_inv) default(none)
     do j=1,nt
-       tmp1d1(j) = (t(j)-t0)*p_inv                                          !phase -1 -- 1
-       tmp1d2(j) = sign(1._fd, -(mod(tmp1d1(j) + 0.25_fd, 1._fd) - 0.5_fd)) !sign
-       tmp1d1(j) = 6.28318*tmp1d1(j)                                        !phase -2pi -- 2pi
-       tmp1d1(j) = tmp1d2(j)*a*sqrt(sin(tmp1d1(j))**2 + (cos(i)*cos(tmp1d1(j)))**2) !projected distance z
+       tmp1d1(j) = (t(j)-t0)*p_inv                                                  !phase -1 -- 1
+       tmp1d2(j) = sign(1._fd, -(mod(tmp1d1(j) + 0.25_fd, 1._fd) - 0.5_fd))         !sign
+       tmp1d1(j) = 6.28318_fd*tmp1d1(j)                                             !phase -2pi -- 2pi
+       tmp1d1(j) = tmp1d2(j)*a*sqrt(sin(tmp1d1(j))**2 + (cos(i)*cos(tmp1d1(j)))**2) !projected distance z     
     end do
     !$omp end parallel do
-    call eval(tmp1d1(1:nt), r, u, npol, 1._fd, nthreads, nt, nu, res)
-  end subroutine eval_t
 
-  subroutine eval(z, r, u, npol, zeropoint, nt, nz, nu, res)
+    call eval_p_d(tmp1d1(1:nt), r, u, npol, 1._fd, nthreads, nt, nu, res)
+  end subroutine eval_t_d
+
+  subroutine eval_p_d(z, r, u, npol, zeropoint, nt, nz, nu, res)
     use omp_lib
     implicit none
     integer, intent(in) :: nz, nu, nt, npol
@@ -162,7 +164,7 @@ contains
     res = zeropoint + res
     !t_finish = mpi_wtime()
     !print *, t_finish - t_start
-  end subroutine eval
+  end subroutine eval_p_d
 
 
   function gimenez_v(z, u, r, npol)
@@ -194,10 +196,12 @@ contains
        Cn(1) = (1._fd - sum(u)) / (1._fd - sum(u*n(2:) / (n(2:)+2._fd)))
        Cn(2:) = u / (1._fd - n(2:) * u / (n(2:)+2._fd))
     end if
-    
+
+    !$omp parallel do private(i), shared(z,gimenez_v, a, Cn) default(none)
     do i=1,size(z)
        gimenez_v(i) = -sum(a(i,:)*Cn)
     end do
+    !$omp end parallel do
   end function gimenez_v
   
   !!--- Alpha ---
@@ -225,13 +229,13 @@ contains
     call jacobi(npol,    nu,    1._fd, 1._fd-2._fd*(1._fd-b), n+1, j_e, e)
     
     sm = 0._fd
-    !$omp parallel default(none) private(i,vl) shared(a,a_e_nm1,a_e_nm2,a_e_vl1,npol,nu,b,c,d,e,sm,norm,n)
+    !$omp parallel default(none) private(i,vl) shared(a,a_e_nm,a_e_vl,npol,nu,b,c,d,e,sm,norm,n)
     !$omp do &
     !$omp schedule(static) &
     !$omp reduction(+:sm)
     do i = 1, npol
-       e(1,i) = e(1,i) * a_e_nm2(i,n+1)
-       sm  = sm + (a_e_vl1(i,n+1) * d(:,i) * e(1,i)**2)
+       e(1,i) = e(1,i) * a_e_nm(i,n+1)
+       sm  = sm + (a_e_vl(i,n+1) * d(:,i) * e(1,i)**2)
     end do
     !$omp end do
        
