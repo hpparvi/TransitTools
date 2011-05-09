@@ -210,43 +210,60 @@ contains
   !!
   subroutine alpha(b, c, n, npol, a)
     implicit none
+    integer, parameter :: chunk_size = 128
     real(8), intent(in), dimension(:) :: b, c
     integer, intent(in) :: n, npol
     real(8), dimension(size(c)), intent(out) :: a
 
     real(8), dimension(size(c)) :: norm, sm
-    real(8), dimension(size(b), npol) :: e
-    real(8), dimension(size(c), npol) :: d
+    real(8), dimension(1, npol) :: e
+    real(8), dimension(chunk_size, npol) :: d
 
     real(8) :: nu
-    integer :: i
+    integer :: i, n_chunks, i_chunk, ic_s, ic_e
 
+    n_chunks = size(c) / chunk_size
     nu   = (real(n,8)+2._fd)/2._fd
-    
-    !$omp parallel workshare default(shared)
-    norm = b(1)*b(1) * (1._fd - c*c)**(1._fd + nu) / (nu * gamma(1._fd + nu))
-    !$omp end parallel workshare
-
-    call jacobi(npol, 0._fd, 1._fd+nu, 1._fd-2._fd*c**2,      n+1, j_d, d)
-    call jacobi(npol,    nu,    1._fd, 1._fd-2._fd*(1._fd-b), n+1, j_e, e)
-
     sm = 0._fd
-    !$omp parallel default(none) private(i) shared(a,a_e_nm,a_e_vl,npol,nu,b,c,d,e,sm,norm,n)
-    !$omp do &
-    !$omp schedule(static) &
-    !$omp reduction(+:sm)
+
+    !$omp parallel private(i, i_chunk, ic_s, ic_e, d) default(shared)
+    !$omp workshare
+    norm = b(1)*b(1) * (1._fd - c*c)**(1._fd + nu) / (nu * gamma(1._fd + nu))
+    !$omp end workshare
+
+    !$omp single
+    call jacobi(npol,  nu,  1._fd,  1._fd-2._fd*(1._fd-b),  n+1,  j_e,  e)
     do i = 1, npol
        e(1,i) = e(1,i) * a_e_nm(i,n+1)
-       sm  = sm + (a_e_vl(i,n+1) * d(:,i) * e(1,i)**2)
+       e(1,i) = e(1,i)**2
+    end do
+    !$omp end single
+
+    !$omp do
+    do i_chunk = 0, n_chunks-1
+       ic_s = 1+(i_chunk)*chunk_size
+       ic_e = (i_chunk+1)*chunk_size
+       call jacobi(npol, 0._fd, 1._fd+nu, 1._fd-2._fd*c(ic_s:ic_e)**2, n+1, j_d, d)
+       do i = 1, npol
+          sm(ic_s:ic_e)  = sm(ic_s:ic_e) + (a_e_vl(i,n+1) * d(:,i) * e(1,i))
+       end do
     end do
     !$omp end do
-       
+
+    !$omp single
+    ic_s = n_chunks*chunk_size +1
+    call jacobi(npol, 0._fd, 1._fd+nu, 1._fd-2._fd*c(ic_s:)**2, n+1, j_d, d(:size(c)-ic_s+1,:))
+    do i = 1, npol
+       sm(ic_s:)  = sm(ic_s:) + (a_e_vl(i,n+1) * d(:size(c)-ic_s,i) * e(1,i))
+    end do
+    !$omp end single
+
     !$omp workshare
     a = norm * sm
     !$omp end workshare
-
     !$omp end parallel
-  end subroutine alpha
+
+end subroutine alpha
 
   !!--- Jacobi polynomials ---
   !!
@@ -265,23 +282,15 @@ contains
 
     integer :: i, j, k
     j = i_ld
-
-    !! TODO: Change to a more cache-friendly stucture for the data.
-    !!
-    !$omp parallel default(shared) private(k)
-    !$omp workshare 
+    
     cx(:,1) = 1._fd
     cx(:,2) = ( 1._fd + 0.5_fd * ( alpha + beta ) ) * x + 0.5_fd * ( alpha - beta )
-    !$omp end workshare
 
     do i = 2, npol-1
-       !$omp do
        do k = 1, size(x)
           cx(k, i+1) = ( ( j_c(3,i,j) + j_c(2,i,j) * x(k) ) * cx(k,i) + j_c(4,i,j) * cx(k,i-1) ) / j_c(1,i,j)
        end do
-       !$omp end do
     end do
-    !$omp end parallel
   end subroutine jacobi
 
 end module gimenez
