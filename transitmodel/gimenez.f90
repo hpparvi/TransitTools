@@ -111,7 +111,10 @@ contains
     real(8), intent(in) :: r, t0, p, a, i
     real(8), intent(out), dimension(nt) :: res
 
-    real(8), dimension(nt) :: dt, ph, sn, z
+    real(8), external :: fastcos, fastsin
+
+    real(8) :: ph, sn, sinph, cosph
+    real(8), dimension(nt) :: z
 
     real(8) :: p_inv
     integer :: j
@@ -122,45 +125,44 @@ contains
     !!       is needed as well.
     !!
     p_inv = 1._fd/p
-    !$omp parallel do private(j) shared(tmp1d1, tmp1d2, a, i, t, t0, p_inv) default(none)
+   !$omp parallel do private(j, ph, sn, sinph, cosph) shared(tmp1d1, a, i, t, t0, p_inv) default(none)
     do j=1,nt
-       tmp1d1(j) = (t(j)-t0)*p_inv                                                  !phase -1 -- 1
-       tmp1d2(j) = sign(1._fd, -(mod(tmp1d1(j) + 0.25_fd, 1._fd) - 0.5_fd))         !sign
-       tmp1d1(j) = 6.28318_fd*tmp1d1(j)                                             !phase -2pi -- 2pi
-       tmp1d1(j) = tmp1d2(j)*a*sqrt(sin(tmp1d1(j))**2 + (cos(i)*cos(tmp1d1(j)))**2) !projected distance z     
+       ph = (t(j)-t0)*p_inv                                                  !phase -1 -- 1
+       sn = sign(1._fd, -(mod(ph + 0.25_fd, 1._fd) - 0.5_fd))         !sign
+       ph = 6.28318_fd*ph                                             !phase -2pi -- 2pi
+       call fastsincos(ph, sinph, cosph)
+       !tmp1d1(j) = sn*a*sqrt(fastsin(ph)**2 + (fastcos(i)*fastcos(ph))**2)        !projected distance z     
+       tmp1d1(j) = sn*a*sqrt(sinph**2 + (fastcos(i)*cosph)**2)        !projected distance z     
     end do
     !$omp end parallel do
 
     call eval_p_d(tmp1d1(1:nt), r, u, npol, 1._fd, nthreads, nt, nu, res)
   end subroutine eval_t_d
 
-  subroutine eval_p_d(z, r, u, npol, zeropoint, nt, nz, nu, res)
+  subroutine eval_p_d(z, r, u, npol, zeropoint, nthreads, npt, nldc, res)
     use omp_lib
     implicit none
-    integer, intent(in) :: nz, nu, nt, npol
-    real(8), intent(in), dimension(nz) :: z
-    real(8), intent(in), dimension(nu) :: u
+    integer, intent(in) :: npt, nldc, nthreads, npol
+    real(8), intent(in), dimension(npt) :: z
+    real(8), intent(in), dimension(nldc) :: u
     real(8), intent(in) :: r, zeropoint
-    real(8), intent(out), dimension(nz) :: res
+    real(8), intent(out), dimension(npt) :: res
     
-    logical, dimension(nz) :: mask
-    real(8), dimension(:), allocatable :: z_t, res_t
-    integer :: nz_t
-    real(8) :: t_start, t_finish
+    logical, dimension(npt) :: mask
+    integer :: npt_t
+    !real(8) :: t_start, t_finish
 
     !t_start = mpi_wtime()
-    ! $ if (nt /= 0) call omp_set_num_threads(nt)
+    ! $ if (nthreads /= 0) call omp_set_num_threads(nthreads)
 
     res  = 0._fd
     mask = (z > 0._fd) .and. (z < 1._fd+r)
-    nz_t = count(mask)
+    npt_t = count(mask)
 
-    allocate(z_t(nz_t), res_t(nz_t))
-    z_t   = pack(z, mask)
-    res_t = gimenez_v(z_t, u, r, npol)
-    res   = unpack(res_t, mask, res)
-    deallocate(z_t, res_t)
-    
+    tmp1d1 = pack(z, mask)
+    tmp1d2(1:npt_t) = gimenez_v(tmp1d1(1:npt_t), u, r, npol)
+    res   = unpack(tmp1d2(1:npt_t), mask, res)
+
     res = zeropoint + res
     !t_finish = mpi_wtime()
     !print *, t_finish - t_start
@@ -179,7 +181,7 @@ contains
     real(8), dimension(size(z), size(u)+1) :: a 
     real(8), dimension(size(u)+1) :: n, Cn
     real(8), dimension(1) :: b
-    real(8), dimension(size(z)) :: c !,b
+    real(8), dimension(size(z)) :: c
     integer :: i, j 
 
     a  = 0._fd
@@ -212,7 +214,7 @@ contains
     integer, intent(in) :: n, npol
     real(8), dimension(size(c)), intent(out) :: a
 
-    real(8), dimension(size(c)) :: norm, vl, sm
+    real(8), dimension(size(c)) :: norm, sm
     real(8), dimension(size(b), npol) :: e
     real(8), dimension(size(c), npol) :: d
 
@@ -220,16 +222,16 @@ contains
     integer :: i
 
     nu   = (real(n,8)+2._fd)/2._fd
-
+    
     !$omp parallel workshare default(shared)
-    norm = b(1)*b(1) * (1._fd - c*c)**(1._fd + nu) / (nu * GAMMA(1._fd + nu))
+    norm = b(1)*b(1) * (1._fd - c*c)**(1._fd + nu) / (nu * gamma(1._fd + nu))
     !$omp end parallel workshare
 
     call jacobi(npol, 0._fd, 1._fd+nu, 1._fd-2._fd*c**2,      n+1, j_d, d)
     call jacobi(npol,    nu,    1._fd, 1._fd-2._fd*(1._fd-b), n+1, j_e, e)
-    
+
     sm = 0._fd
-    !$omp parallel default(none) private(i,vl) shared(a,a_e_nm,a_e_vl,npol,nu,b,c,d,e,sm,norm,n)
+    !$omp parallel default(none) private(i) shared(a,a_e_nm,a_e_vl,npol,nu,b,c,d,e,sm,norm,n)
     !$omp do &
     !$omp schedule(static) &
     !$omp reduction(+:sm)
@@ -259,20 +261,25 @@ contains
     real(8), intent(in) :: alpha, beta
     real(8), intent(in), dimension(:) :: x
     real(8), intent(in), dimension(:,:,:) :: j_c
-    real(8), intent(out), dimension(:,:) :: cx
+    real(8), intent(out), dimension(size(x),npol) :: cx
 
-    integer :: i, j
+    integer :: i, j, k
     j = i_ld
 
-    !$omp parallel default(shared)
+    !! TODO: Change to a more cache-friendly stucture for the data.
+    !!
+    !$omp parallel default(shared) private(k)
     !$omp workshare 
     cx(:,1) = 1._fd
     cx(:,2) = ( 1._fd + 0.5_fd * ( alpha + beta ) ) * x + 0.5_fd * ( alpha - beta )
     !$omp end workshare
+
     do i = 2, npol-1
-       !$omp workshare
-       cx(:, i+1) = ( ( j_c(3,i,j) + j_c(2,i,j) * x ) * cx(:,i) + j_c(4,i,j) * cx(:,i-1) ) / j_c(1,i,j)
-       !$omp end workshare
+       !$omp do
+       do k = 1, size(x)
+          cx(k, i+1) = ( ( j_c(3,i,j) + j_c(2,i,j) * x(k) ) * cx(k,i) + j_c(4,i,j) * cx(k,i-1) ) / j_c(1,i,j)
+       end do
+       !$omp end do
     end do
     !$omp end parallel
   end subroutine jacobi
