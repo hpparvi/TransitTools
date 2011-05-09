@@ -19,6 +19,7 @@ from transitLightCurve.transitparameterization import TransitParameterization
 import fitnessfunction_f as ff
 calculate_time_with_ttv = ff.fitnessfunction.calculate_time_with_ttv
 chi_sqr = ff.fitnessfunction.chi_sqr
+apply_zeropoints = ff.fitnessfunction.apply_zeropoints
 
 def addl(code, cdl):
     code.append(cdl+'\n')
@@ -40,11 +41,11 @@ class FitnessFunction(object):
         self.ivars  = [t.get_ivar(normalize=True) for t in data]
         self.pntns  = [t.pntn                     for t in data]
         self.slices = [t.get_transit_slices()     for t in data]
-        self.lengths= array([t.size for t in self.times])
+        self.lengths= array([t.size for t in self.times]).astype(np.int32)
 
         self.tnumbs = []
         for i, ch in enumerate(self.data):
-            self.tnumbs.append(np.zeros(ch.time.size))
+            self.tnumbs.append(np.zeros(self.times[i].size))
             for sl, tn in zip(self.slices[i], [t.number for t in ch.transits]):
                 self.tnumbs[i][sl] = tn
 
@@ -158,10 +159,15 @@ class FitnessFunction(object):
                         addl(c, '    atmp[:] = calculate_time_with_ttv(ttv_a, ttv_p, period, tm, tn)')
                         #addl(c, '    ttv[:] = ne.evaluate("ttv_a*sin( TWO_PI*ttv_p * period*tn)")')
                         #addl(c, '    add(tm, ttv, atmp)')
-                        addl(c, '    mtmp[:] = lc(atmp, kp, ld)')
+                        addl(c, '    model = lc(atmp, kp, ld)')
+                        addl(c, '    zp = array([gz(chi) for chi in range(self.nch)])')
+                        #addl(c, '    print "1", mtmp.sum()')
+                        addl(c, '    mtmp = apply_zeropoints(zp, self.lengths, model)')
+                        #addl(c, '    print "2", mtmp.sum(), self.lengths')
+                        #addl(c, '    print atmp; import pylab as pl; pl.plot(mtmp); pl.plot(fl);pl.show(); exit()')
                         addl(c, '    chi = chi_sqr(fl, mtmp, iv)') # ne.evaluate("sum((fl - mtmp)**2 * iv)")')
                         #addl(c, '    chi += ((fl - mtmp)**2 * iv).sum()')
-
+                        #TODO: the zeropoint is not included at the moment!!!!!
                 else:
                     raise NotImplementedError
                 #     else:

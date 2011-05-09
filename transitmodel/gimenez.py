@@ -16,10 +16,11 @@ class Gimenez(TransitModel):
     """Implements the transit model by A. Gimenez (A&A 450, 1231--1237, 2006).
     Adapted from the code at http://thor.ieec.uab.es/LRVCode"""
 
-    def __init__(self, method='python', n_threads=0, zeropoint=1., npol=500, float_t=np.float64):
+    def __init__(self, method='python', mode='time', n_threads=0, zeropoint=1., npol=500, float_t=np.float64):
         self.float_t = float_t
         self.n_threads = n_threads
         self.method = method
+        self.mode = mode
         self.zeropoint = zeropoint
         self.npol = npol
         self.nldc = 2
@@ -28,10 +29,13 @@ class Gimenez(TransitModel):
             self.shape   = self._shape_py
         elif method == 'fortran' and with_gimenez_f:
             gimenez_f.gimenez.init(npol, self.nldc)
-            self.shape = gimenez_f.gimenez.eval_t
+            if self.mode == 'time':
+                self.shape = gimenez_f.gimenez.eval_t_d
+            else:
+                self.shape = gimenez_f.gimenez.eval_p_d
             
     def __call__(self, z, r, u=[], t0=0, p=0, a=0, i=0):
-        if self.method == 'python':
+        if self.method == 'python' or self.mode == 'phase':
             return self.shape(z, r, asarray(u), self.npol, self.zeropoint, self.n_threads)
         else:
             return self.shape(z, r, asarray(u), self.npol, t0, p, a, i, self.n_threads)

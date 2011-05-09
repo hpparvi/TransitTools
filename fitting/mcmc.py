@@ -22,7 +22,6 @@ from numpy.random import normal
 from transitLightCurve.core import *
 from mcmcprior import mcmcpriors, UniformPrior, JeffreysPrior
 
-
 class DrawSample(object): pass
 
 
@@ -206,7 +205,7 @@ class MCMC(object):
 
                 ## DEBUGGING CODE
                 ## ==============
-                if i_s!=0 and i_s%25 == 0:
+                if i_s!=0 and i_s%250 == 0:
                     #print "%2i %5i"%(mpi_rank, i_s), self.result.get_acceptance()
                     pl.figure(10, figsize=(20,20))
                     pl.clf()

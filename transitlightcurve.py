@@ -12,14 +12,15 @@ class TransitLightcurve(object):
     def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time', method='fortran', zeropoint=1., npol=500, n_threads=0):
         self.parm  = parm
         self.method = method
-        self.model = model if model is not None else Gimenez(method=method, zeropoint=zeropoint, n_threads=n_threads, npol=npol)
+        self.mode  = mode
+        self.model = model if model is not None else Gimenez(method=method, mode=mode, zeropoint=zeropoint, n_threads=n_threads, npol=npol)
         self.orbit = orbit if orbit is not None else Geometry(mode=mode)
         self.ldpar = ldpar if ldpar is not None else []
         self.orbit.update(self.parm)
 
     def __call__(self, time, p=None, ldp=None):
         if p is not None or ldp is not None: self.update(p, ldp)
-        if self.method == 'python':
+        if self.method == 'python' or self.mode == 'phase':
             return self.model(self.orbit.projected_distance(time), self.orbit.k, self.ldpar)
         else:
             return self.model(time, self.orbit.k, self.ldpar, self.orbit.t0, self.orbit.p, self.orbit.a, self.orbit.i)
