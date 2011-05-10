@@ -205,7 +205,7 @@ class MCMC(object):
 
                 ## DEBUGGING CODE
                 ## ==============
-                if i_s!=0 and i_s%250 == 0:
+                if i_s!=0 and i_s%150 == 0:
                     #print "%2i %5i"%(mpi_rank, i_s), self.result.get_acceptance()
                     pl.figure(10, figsize=(20,20))
                     pl.clf()
@@ -213,9 +213,12 @@ class MCMC(object):
                         ax1 = pl.subplot(self.n_parms,2,ip*2+1)
                         pl.text(0.02, 0.85, self.p_names[ip],transform = ax1.transAxes)
                         pl.plot(self.result.steps[0,:i_s,ip])
+                        pl.yticks([])
+                        pl.xticks([])
                         pl.subplot(self.n_parms,2,ip*2+2)
                         pl.hist(self.result.steps[0,:i_s,ip])
-                        pl.savefig('mcmcdebug_n%i_%i.pdf'%(mpi_rank,chain))
+                        pl.yticks([])
+                    pl.savefig('mcmcdebug_n%i_%i.pdf'%(mpi_rank,chain))
 
                 self.ui.update()
 

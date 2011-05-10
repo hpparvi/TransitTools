@@ -38,6 +38,7 @@ contains
     do i=1,n
        chi_sqr = chi_sqr + (observed(i) - model(i))**2 * var_inv(i)
     end do
+    !$omp end parallel do
   end function chi_sqr
 
   subroutine apply_zeropoints(zeropoints, chn_l, model, nchn, npt, res)

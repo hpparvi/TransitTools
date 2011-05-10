@@ -104,13 +104,13 @@ class FitnessFunction(object):
         addl(c, "def fitfun(self, p_fit):")
         addl(c, "  self.parm.update(p_fit)")
         addl(c, "  if self.parm.is_inside_limits():")
-        addl(c, "    gz=self.gz; gk=self.gk; gl=self.gl; gb=self.gb; lc=self.lc; ttv=self.ttv; atmp=self.atmp; mtmp=self.mtmp")
-        addl(c, "    fl=self.afluxes; tm=self.atimes; iv=self.aivars; tn=self.atnumbs")
+        #addl(c, "    gz=self.gz; gk=self.gk; gl=self.gl; gb=self.gb; lc=self.lc; ttv=self.ttv; atmp=self.atmp; mtmp=self.mtmp")
+        #addl(c, "    fl=self.afluxes; tm=self.atimes; iv=self.aivars; tn=self.atnumbs")
         if with_numexpr:
             for i in range(len(self.data)):
                 addl(c, '    fl_{ch}=fl[{ch}]; tm_{ch}=tm[{ch}]; iv_{ch} = iv[{ch}]; tn_{ch} = tn[{ch}]'.format(ch=i))
 
-        addl(c, "    chi=0.")
+        #addl(c, "    chi=0.")
 
         if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
             if self.parm.separate_ld:
@@ -125,15 +125,16 @@ class FitnessFunction(object):
                 for i in range(len(self.data)):
                     if i>0: addl(c, "    if not np.all(asarray(self.gl({0})) > asarray(self.gl({1}))): return 1e18".format(i, i-1))
             else:
-                addl(c, "    ld = gl(); b2 = gb()")
+                addl(c, "    ld = self.gl()")
                 addl(c, "    if ld[0] < 0. or ld[0] > 1.: return 1e18")
-                addl(c, "    if b2 < 0. or b2 > 1.: return 1e18")
+                addl(c, "    b2 = self.gb()")
+                addl(c, "    if b2 < 0. or b2 > 1.: return 1e18\n")
 
             if self.parm.fit_ttv:
                 addl(c, "    p_ttv = self.gt(); ttv_a = p_ttv[0]; ttv_p = p_ttv[1]")
 
             if not self.parm.separate_k2_ch:
-                addl(c, '    kp=gk(); period=kp[2]')
+                addl(c, '    kp=self.gk(); period=kp[2]')
             else:
                 raise NotImplementedError
 
@@ -141,33 +142,18 @@ class FitnessFunction(object):
             for ch in range(1): #range(len(self.data)):
                 addl(c,'')
                 if not self.parm.separate_zp_tr:
-                    zp_str = 'gz({})'.format(ch)
+                    zp_str = 'self.gz({})'.format(ch)
 
-                if self.parm.separate_k2_ch: addl(c, '    kp=gk({0})'.format(ch))
-                if self.parm.separate_ld: addl(c, '    ld=gl({0})'.format(ch))
+                if self.parm.separate_k2_ch: addl(c, '    kp=self.gk({0})'.format(ch))
+                if self.parm.separate_ld: addl(c, '    ld=self.gl({0})'.format(ch))
 
                 if self.parm.fit_ttv:
-                    if with_numexpr:
-                        zp_str = 'zp'
-                        addl(c, '    tn_{ch:d} = tn[{ch:d}]; zp = gz({ch})'.format(ch=ch))
-                        addl(c, '    tm_t  = ne.evaluate("tm_{ch} + ttv_a*sin( TWO_PI*ttv_p * period*tn_{ch:d} )")'.format(ch=ch))
-                        addl(c, '    model = lc(tm_t, kp, ld)'.format(ch=ch))
-                        addl(c, '    chi  += ne.evaluate("sum((fl_{ch} - {zp}*model)**2 * iv_{ch})")'.format(ch=ch,zp=zp_str))
-                    else:
-                        #addl(c, '    ttv = ttv_a*np.sin( TWO_PI*ttv_p * period*tn[{ch}] )'.format(ch=ch))
-                        #addl(c, '    chi += ((fl[{ch}] - {zp}*lc(tm[{ch}] + ttv, kp, ld))**2 * iv[{ch}]).sum()'.format(ch=ch,zp=zp_str))
-                        addl(c, '    atmp[:] = calculate_time_with_ttv(ttv_a, ttv_p, period, tm, tn)')
-                        #addl(c, '    ttv[:] = ne.evaluate("ttv_a*sin( TWO_PI*ttv_p * period*tn)")')
-                        #addl(c, '    add(tm, ttv, atmp)')
-                        addl(c, '    model = lc(atmp, kp, ld)')
-                        addl(c, '    zp = array([gz(chi) for chi in range(self.nch)])')
-                        #addl(c, '    print "1", mtmp.sum()')
-                        addl(c, '    mtmp = apply_zeropoints(zp, self.lengths, model)')
-                        #addl(c, '    print "2", mtmp.sum(), self.lengths')
-                        #addl(c, '    print atmp; import pylab as pl; pl.plot(mtmp); pl.plot(fl);pl.show(); exit()')
-                        addl(c, '    chi = chi_sqr(fl, mtmp, iv)') # ne.evaluate("sum((fl - mtmp)**2 * iv)")')
-                        #addl(c, '    chi += ((fl - mtmp)**2 * iv).sum()')
-                        #TODO: the zeropoint is not included at the moment!!!!!
+                    addl(c, '    zp = array([self.gz(i_ch) for i_ch in range(self.nch)])')
+                    addl(c, '    self.atmp[:] = calculate_time_with_ttv(ttv_a, ttv_p, period, self.atimes, self.atnumbs)')
+                    addl(c, '    self.atmp[:] = self.lc(self.atmp, kp, ld)')
+                    addl(c, '    self.atmp[:] = apply_zeropoints(zp, self.lengths, self.atmp)')
+                    #addl(c, '    print atmp; import pylab as pl; pl.plot(mtmp); pl.plot(fl);pl.show(); exit()')
+                    addl(c, '    chi = chi_sqr(self.afluxes, self.atmp, self.aivars)') # ne.evaluate("sum((fl - mtmp)**2 * iv)")')
                 else:
                     raise NotImplementedError
                 #     else:
