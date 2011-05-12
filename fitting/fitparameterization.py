@@ -214,10 +214,15 @@ class MTFitParameterization(object):
             if not self.separate_ld:
                 ## Case 3.1a: linear limb darkening
                 if self.n_ldc == 1:
-                    add_parameter(True, 'b2 + u')
-                    add_parameter(True, 'b2 - u')
-                    ldp_min = [p['b'].min_s**2 + p['u'].min_s, p['b'].min_s**2 - p['u'].max_s]
-                    ldp_max = [p['b'].max_s**2 + p['u'].max_s, p['b'].max_s**2 - p['u'].min_s]
+                    add_parameter(True, 'b2')
+                    add_parameter(True, 'u')
+                    ldp_min = [p['b'].min_s**2, p['u'].min_s]
+                    ldp_max = [p['b'].max_s**2, p['u'].max_s]
+
+                    #add_parameter(True, 'b2 + u')
+                    #add_parameter(True, 'b2 - u')
+                    #ldp_min = [p['b'].min_s**2 + p['u'].min_s, p['b'].min_s**2 - p['u'].max_s]
+                    #ldp_max = [p['b'].max_s**2 + p['u'].max_s, p['b'].max_s**2 - p['u'].min_s]
 
                 ## Case 3.1b: quadratic limb darkening
                 else:
@@ -323,7 +328,7 @@ class MTFitParameterization(object):
         ## =========================
         if 'k2' in self.constant_parameter_names:
             self.constant_parameters[self.constant_parameter_names=='k2'] = self.pset['k'].value**2
-
+            
         if 'b2' in self.constant_parameter_names:
             self.constant_parameters[self.constant_parameter_names=='b2'] = self.pset['b'].value**2
 
@@ -405,7 +410,7 @@ class MTFitParameterization(object):
 
         if not self.fit_impact_parameter:
             return "self.constant_parameters[%i]" %cpi['b2']
-        elif not self.fit_limb_darkening or self.separate_ld:
+        elif not self.fit_limb_darkening or self.separate_ld or self.n_ldc == 1:
             return "self.fitted_parameters[%i]" %fpi['b2']
         else:
             n1 = 'b2 + u' if self.n_ldc == 1 else 'b2 + u + v'
@@ -454,9 +459,10 @@ class MTFitParameterization(object):
         else:
             if not self.separate_ld:
                 if self.n_ldc == 1:
-                    id1 = "%s[%i]"%(fp, fpi['b2 + u'])
-                    id2 = "%s[%i]"%(fp, fpi['b2 - u'])
-                    return "[0.5*(%s - %s)]"%(id1, id2)
+                    return "[{0}[{1:d}]]".format(fp, fpi['u'])
+                    #id1 = "%s[%i]"%(fp, fpi['b2 + u'])
+                    #id2 = "%s[%i]"%(fp, fpi['b2 - u'])
+                    #return "[0.5*(%s - %s)]"%(id1, id2)
                 else:
                     id1 = "%s[%i]"%(fp, fpi['b2 + u + v']) 
                     id2 = "%s[%i]"%(fp, fpi['b2 - u - v']) 
