@@ -68,10 +68,15 @@ class MCMC(object):
         self.n_steps  = kwargs.get('n_steps', 200) 
         self.thinning = kwargs.get('thinning', 1) 
         self.use_mpi  = kwargs.get('use_mpi', True) 
-        self.verbose  = kwargs.get('verbose', True) 
-
+        self.verbose  = kwargs.get('verbose', True)
+ 
+        self.monitor  = kwargs.get('monitor', True)
+        self.mfile    = kwargs.get('monitor_file', 'mcmc_monitor')
+        self.minterval= kwargs.get('monitor_interval', 150)
+        
         self.autotune_length = kwargs.get('autotune_length', 2000)
         self.autotune_strength = kwargs.get('autotune_strength', 0.5)
+        self.autotune_interval = kwargs.get('autotune_interval', 25)
 
         if with_mpi and self.use_mpi:
             self.seed += mpi_rank
@@ -82,8 +87,11 @@ class MCMC(object):
         else:
             self.n_chains_g = self.n_chains
             self.n_chains_l = self.n_chains
-            
+
         np.random.seed(self.seed)
+
+        if self.monitor:
+            self.fig_progress = pl.figure(10, figsize=(34,20))
 
         self.chifun = chifun
         self.fitpar = self.chifun.parm
@@ -146,6 +154,7 @@ class MCMC(object):
 
     def __call__(self):
         curses.wrapper(self._mcmc)
+        return self.result
 
     def _mcmc(self, *args):
         """The main Markov Chain Monte Carlo routine in all its simplicity."""
@@ -155,7 +164,6 @@ class MCMC(object):
         ## ==============
         for chain in xrange(self.n_chains_l):
             self.i_chain = chain
-            #logging.info('Starting node %2i  chain %2i  of %2i' %(mpi_rank, chain+1, self.n_chains_l))
             P_cur = self.p.copy()
             prior_cur = asarray([p.prior(P_cur[i]) for i, p in enumerate(self.parameters)])
             X_cur = self.chifun(P_cur[:-1])
@@ -194,8 +202,6 @@ class MCMC(object):
                             accept_ratio  = at_test[i_p]/25. 
                             accept_adjust = (1. - self.autotune_strength) + self.autotune_strength*4.* accept_ratio
                             p._draw_method.sigma *= accept_adjust
-                            #info("Autotune: %i %6.4f %6.2f %6.2f"%(i_p, p._draw_method.sigma, accept_ratio, accept_adjust), I1)
-                        #info('', I1)
                         at_test[:] = 0.
                         i_at = 0
                     i_at  += 1
@@ -203,22 +209,10 @@ class MCMC(object):
                 self.result.steps[chain, i_s, :] = P_cur[:]
                 self.result.chi[chain, i_s] = X_cur
 
-                ## DEBUGGING CODE
-                ## ==============
-                if i_s!=0 and i_s%150 == 0:
-                    #print "%2i %5i"%(mpi_rank, i_s), self.result.get_acceptance()
-                    pl.figure(10, figsize=(20,20))
-                    pl.clf()
-                    for ip in range(self.n_parms):
-                        ax1 = pl.subplot(self.n_parms,2,ip*2+1)
-                        pl.text(0.02, 0.85, self.p_names[ip],transform = ax1.transAxes)
-                        pl.plot(self.result.steps[0,:i_s,ip])
-                        pl.yticks([])
-                        pl.xticks([])
-                        pl.subplot(self.n_parms,2,ip*2+2)
-                        pl.hist(self.result.steps[0,:i_s,ip])
-                        pl.yticks([])
-                    pl.savefig('mcmcdebug_n%i_%i.pdf'%(mpi_rank,chain))
+                ## MONITORING CODE
+                ## ===============
+                if self.monitor and (i_s+1)%self.minterval == 0:
+                    self.plot_simulation_progress(i_s, chain)
 
                 self.ui.update()
 
@@ -245,6 +239,29 @@ class MCMC(object):
 
     def init_curses(self):
         self.ui = MCMCCursesUI(self)
+
+    def plot_simulation_progress(self, i_s, chain):
+        fig = self.fig_progress
+        fig.clf()
+        nrows = self.n_parms/2+1
+        ncols = 6
+        for ip in range(self.n_parms):
+            d = self.result.steps[0,:i_s,ip]
+            ax_chain = fig.add_subplot(nrows,ncols,ip*3+1)
+            ax_hist  = fig.add_subplot(nrows,ncols,ip*3+2)
+            ax_acorr = fig.add_subplot(nrows,ncols,ip*3+3)
+
+            pl.text(0.035, 0.85, self.p_names[ip],transform = ax_chain.transAxes,
+                    backgroundcolor='1.0', size='large')
+            ax_chain.plot(self.result.steps[0,:i_s,ip])
+            ax_hist.hist(d)
+            ax_acorr.acorr(d-d.mean(), maxlags=75, usevlines=True)
+            ax_acorr.axhline(1./np.e, ls='--', c='0.5')
+            pl.setp([ax_chain, ax_hist, ax_acorr], yticks=[])
+            pl.setp(ax_chain, xlim=[0,i_s])
+            pl.setp(ax_acorr, xlim=[-75,75], ylim=[0,1])
+        pl.subplots_adjust(top=0.99, bottom=0.02, left=0.01, right=0.99, hspace=0.2, wspace=0.04)
+        pl.savefig('mcmcdebug_n%i_%i.pdf'%(mpi_rank,chain))
 
 class MCMCCursesUI(object):
     def __init__(self, mcmc):
