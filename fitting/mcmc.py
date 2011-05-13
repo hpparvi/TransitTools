@@ -10,8 +10,6 @@ import time
 import numpy as np
 import pylab as pl
 import scipy as sp
-import tables as tbl
-import scipy.signal
 
 from cPickle import dump, load
 
@@ -23,7 +21,6 @@ from transitLightCurve.core import *
 from mcmcprior import mcmcpriors, UniformPrior, JeffreysPrior
 
 class DrawSample(object): pass
-
 
 class DrawGaussian(DrawSample):
     def __init__(self, sigma):

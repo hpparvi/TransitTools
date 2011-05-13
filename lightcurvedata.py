@@ -1,9 +1,13 @@
 import numpy as np
 import matplotlib.pyplot as pl
 
-from scipy.interpolate import LSQUnivariateSpline as Spline
 from numpy import abs, asarray, array, poly1d, polyfit, concatenate, repeat
 from core import *
+
+try:
+    from scipy.interpolate import LSQUnivariateSpline as Spline
+except ImportError:
+    info("Couldn't import spline from scipy.interpolate.")
 
 class SingleTransit(object):
     def __init__(self, time, flux, err, ivar, tmask, bmask, number, t_center, g_range):
