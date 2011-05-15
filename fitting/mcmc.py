@@ -10,6 +10,7 @@ import time
 import numpy as np
 import pylab as pl
 import scipy as sp
+import pyfits as pf
 
 from cPickle import dump, load
 
@@ -70,7 +71,10 @@ class MCMC(object):
         self.monitor  = kwargs.get('monitor', True)
         self.mfile    = kwargs.get('monitor_file', 'mcmc_monitor')
         self.minterval= kwargs.get('monitor_interval', 150)
-        
+
+        self.sinterval= kwargs.get("autosave_interval", 250)
+        self.sname    = kwargs.get("autosave_filename", 'mcmc_autosave.pkl')
+
         self.autotune_length = kwargs.get('autotune_length', 2000)
         self.autotune_strength = kwargs.get('autotune_strength', 0.5)
         self.autotune_interval = kwargs.get('autotune_interval', 25)
@@ -206,10 +210,13 @@ class MCMC(object):
                 self.result.steps[chain, i_s, :] = P_cur[:]
                 self.result.chi[chain, i_s] = X_cur
 
-                ## MONITORING CODE
-                ## ===============
+                ## MONITORING
+                ## ==========
                 if self.monitor and (i_s+1)%self.minterval == 0:
                     self.plot_simulation_progress(i_s, chain)
+
+                if (i_s+1)%self.sinterval == 0:
+                    self.result.save(self.sname)
 
                 self.ui.update()
 
@@ -343,6 +350,9 @@ class MCMCResult(FitResult):
         dump(self, f)
         f.close()
 
+
+    def save_fits(self, filename):
+        pass
 
 def load_MCMCResult(filename):
     f = open(filename, 'rb')
