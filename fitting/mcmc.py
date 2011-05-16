@@ -350,9 +350,38 @@ class MCMCResult(FitResult):
         dump(self, f)
         f.close()
 
-
     def save_fits(self, filename):
         pass
+
+    def plot(self, i_c, burn_in, thinning, fign=100, s_max=-1, c='b', alpha=1.0):
+        fig = pl.figure(fign, figsize=(34,20), dpi=50)
+        nrows = self.n_parms/2+1
+        ncols = 6
+        mask = np.abs(self.steps[i_c,:,:]).sum(1) > 0.
+        mask[:burn_in] = False
+        mask[s_max:] = False
+        ns = mask.sum()/thinning
+        for i_p in range(self.n_parms):
+            xmin = self.steps[:,mask,i_p][:,::thinning].min()
+            xmax = self.steps[:,mask,i_p][:,::thinning].max()
+            d = self.steps[i_c,mask,i_p][::thinning]
+
+            ax_chain = fig.add_subplot(nrows,ncols,i_p*3+1)
+            ax_hist  = fig.add_subplot(nrows,ncols,i_p*3+2)
+            ax_acorr = fig.add_subplot(nrows,ncols,i_p*3+3)
+
+            pl.text(0.035, 0.85, self.p_names[i_p],transform = ax_chain.transAxes,
+                    backgroundcolor='1.0', size='large')
+            ax_chain.plot(d, c=c, alpha=1.0)
+            ax_hist.hist(d, range=[xmin,xmax], fc=c, alpha=alpha)
+            ax_acorr.acorr(d-d.mean(), maxlags=75, usevlines=True, color=c)
+            ax_acorr.axhline(1./np.e, ls='--', c='0.5')
+            pl.setp([ax_chain, ax_hist, ax_acorr], yticks=[])
+            pl.setp(ax_chain, xlim=[0,ns])
+            pl.setp(ax_acorr, xlim=[-75,75], ylim=[0,1])
+        pl.subplots_adjust(top=0.99, bottom=0.02, left=0.01, right=0.99, hspace=0.2, wspace=0.04)
+        #pl.savefig('%i_%i.pdf'%(mpi_rank,chain))
+
 
 def load_MCMCResult(filename):
     f = open(filename, 'rb')
