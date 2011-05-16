@@ -3,8 +3,8 @@ OPTS_OMP = "-O3 -march=native -fopenmp -ftree-vectorize -ffast-math -ftree-vecto
 LIBS = -lacml_mp -lacml_mv
 
 FLAGS = -DF2PY_REPORT_ON_ARRAY_COPY=1
-#CMP = --f90exec=/usr/bin/mpif90
-CMP = --f90exec=//opt/openmpi/bin/mpif90
+CMP = --f90exec=/usr/bin/mpif90
+#CMP = --f90exec=//opt/openmpi/bin/mpif90
 #CMP = --fcompiler="gnu95"
 
 all: transitmodel/gimenez.f90 Fortran/utilities.f90 fitting/fitnessfunction.f90
