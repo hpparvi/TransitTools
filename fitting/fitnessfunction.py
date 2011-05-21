@@ -100,25 +100,25 @@ class FitnessFunction(object):
         """Generates a fitness function based on given fit parameterization.
 
         """
+        nch = len(self.data)
         c = []
         addl(c, "def fitfun(self, p_fit):")
         addl(c, "  self.parm.update(p_fit)")
         addl(c, "  if self.parm.is_inside_limits():")
-        #addl(c, "    gz=self.gz; gk=self.gk; gl=self.gl; gb=self.gb; lc=self.lc; ttv=self.ttv; atmp=self.atmp; mtmp=self.mtmp")
-        #addl(c, "    fl=self.afluxes; tm=self.atimes; iv=self.aivars; tn=self.atnumbs")
-        if with_numexpr:
-            for i in range(len(self.data)):
-                addl(c, '    fl_{ch}=fl[{ch}]; tm_{ch}=tm[{ch}]; iv_{ch} = iv[{ch}]; tn_{ch} = tn[{ch}]'.format(ch=i))
-
-        #addl(c, "    chi=0.")
 
         if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
             if self.parm.separate_ld:
                 for i in range(len(self.data)):
                     if i>0: addl(c, "    if not np.all(asarray(self.gl({0})) > asarray(self.gl({1}))): return 1e18".format(i, i-1))
-
-            for i in range(len(self.data)):
-                addl(c, "    chi += ((fl[{0}] - self.basic_model(tm[{0}], {0}, 0))**2 * iv[{0}]).sum()".format(i))
+                    
+            addl(c, "    chi = 0.")
+            #addl(c, '    zp = array([self.gz(i_ch) for i_ch in range(self.nch)])')
+            for ch in range(len(self.data)):
+                addl(c, '    model = self.gz({ch}) * self.lc(self.times[{ch}], self.gk({ch}), self.gl({ch}))'.format(ch=ch))
+                addl(c, '    chi += chi_sqr(self.fluxes[{ch}], model, self.ivars[{ch}])'.format(ch=ch))
+                #addl(c, '    self.atmp[{ls}:{le}] = self.lc(self.times, self.gk({ch}), self.gl({ch}))'.format(ch=ch, ls=0 if ch==0 else self.lengths[:ch].sum(), le=-1 if ch==len(self.data) else self.lengths[:ch+1].sum()))
+            #addl(c, '    self.atmp[:] = apply_zeropoints(zp, self.lengths, self.atmp)')
+            #addl(c, '    chi = chi_sqr(self.afluxes, self.atmp, self.aivars)')
             addl(c, "    return chi")
         else:
             if self.parm.separate_ld:
