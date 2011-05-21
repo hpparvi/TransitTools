@@ -147,10 +147,12 @@ class MCMC(object):
         """
         if prior_ratio < 0: 
             return False
-        elif np.random.random() < (prior_ratio*exp(0.5*( self.n_points*log(error_ratio) + X0 - Xt))):
-            return True
         else:
-            return False
+            trm = 0.5*( self.n_points*log(error_ratio) + X0 - Xt)
+            if trm > 200 or np.random.random() < prior_ratio*exp(trm):
+                return True
+            else:
+                return False
 
 
     def __call__(self):
