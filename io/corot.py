@@ -42,45 +42,41 @@ class CoRoT_target:
         self.sp = self.stellar_parameters
 
 
-def import_as_MTLC(ctarget, ch='w', width=0.2, twidth=None, maxpts=None, **kwargs):
+def import_as_MTLC(ctarget, width=0.2, twidth=None, maxpts=None, **kwargs):
     hdu_d = pf.open(ctarget.file)
     dat_d = hdu_d[1].data
 
-    stat = dat_d.field('STATUS')
-    date = dat_d.field('DATEJD')
-
     remove_contamination = kwargs.get('remove_contamination', True)
 
-    if ch != 'w' and not ctarget.colors:
-        ch = 'w'
-
-    try:
-        flux = dat_d.field( channel_fits_names[ch]+'flux')
-        fdev = dat_d.field( channel_fits_names[ch]+'fluxdev')
-    except KeyError:
-        flux = np.zeros(date.size)
-        fdev = np.zeros(date.size)
-        for c in ['r','g','b']:
-            flux += dat_d.field( channel_fits_names[c]+'flux')
-            fdev += dat_d.field( channel_fits_names[c]+'fluxdev')
-    
+    stat = dat_d.field('STATUS')
     maskOutOfRange = np.bitwise_and(stat, 1) == 0
     maskOverSAA    = np.bitwise_and(stat, 4) == 0
     mask           = (np.logical_and(maskOverSAA, maskOutOfRange))
 
-    date = date[mask].copy().astype(np.float64)
-    flux = flux[mask].copy().astype(np.float64)
-    fdev = fdev[mask].copy().astype(np.float64)
+    date = dat_d.field('DATEJD')[mask].copy().astype(np.float64)
+
+    flux = []; fdev = []
+    if not ctarget.colors:
+        flux.append(dat_d.field('whiteflux')[mask].copy().astype(np.float64))
+        fdev.append(dat_d.field('whitefluxdev')[mask].copy().astype(np.float64))
+    else:
+        for ch in ['r','g','b']:
+            flux.append(dat_d.field( channel_fits_names[ch]+'flux')[mask].copy().astype(np.float64))
+            fdev.append(dat_d.field( channel_fits_names[ch]+'fluxdev')[mask].copy().astype(np.float64))
 
     if remove_contamination:
-        flux -= ctarget.contamination * flux
+        for i in range(len(flux)):
+            flux[i] -= ctarget.contamination * flux[i]
 
     twidth = twidth or ctarget.transit_width
     maxpts = maxpts or -1 
     
-    mtlc = MultiTransitLC(ch, date[:maxpts]+time_origin, flux[:maxpts], fdev[:maxpts],
-                          ctarget.transit_center, ctarget.planet_period,
-                          width, twidth, channel=ch, **kwargs)
+    mtlc = []
+    for i, ch in zip(range(len(flux)), ['r','g','b']):
+        mtlc.append(MultiTransitLC(channel_fits_names[ch], date[:maxpts]+time_origin,
+                                   flux[i][:maxpts], fdev[i][:maxpts],
+                                   ctarget.transit_center, ctarget.planet_period,
+                                   width, twidth, channel=ch, **kwargs))
 
     return mtlc
 
@@ -159,4 +155,12 @@ C11 = CoRoT_target('EN2_STAR_CHR_0105833549_20080415T231048_20080907T224903.fits
                    stellar_parameters={'T':6440., 'vsini':40.0e3, 'logg': 4.26, 'M':2.525e30, 'R':9.53e8},
                    contamination = 0.13)
 
-CoRoT_targets = {1:C01, 2:C02, 3:C03, 4:C04, 5:C05, 7:C07, 8:C08, 10:C10, 11:C11}
+C23 = CoRoT_target('EN2_STAR_MON_0105228856_20100408T223049_20100705T044435.fits',
+                   name = 'CoRoT-23b',
+                   period = 3.6307667,
+                   transit_center = 2455308.9488,
+                   transit_width  = 3.823*h_to_d,
+                   stellar_parameters={'T':6440., 'vsini':40.0e3, 'logg': 4.26, 'M':2.525e30, 'R':9.53e8},
+                   contamination = 0.045)
+
+CoRoT_targets = {1:C01, 2:C02, 3:C03, 4:C04, 5:C05, 7:C07, 8:C08, 10:C10, 11:C11, 23:C23}
