@@ -71,7 +71,7 @@ class SingleTransit(object):
             fit = poly1d(polyfit(t[mask], f[mask], 2))
             crf = f / fit(t)
             std = crf[mask].std()
-            bmask[tmask] = np.logical_and(bmask[tmask], crf[tmask]-1. <   top    * std)
+            bmask = np.logical_and(bmask, crf-1. < top * std)
             bmask[tmask] = np.logical_and(bmask[tmask], crf[tmask]-1. > - bottom * std)
 
         self.err[emask]    = (f/fit(t)*fit(t).mean())[mask].std()
@@ -249,8 +249,6 @@ class MultiTransitLC(object):
         for t in self.transits:
             t.get_slope()
 
-        #exit()
-
         ## Fit the per-transit continuum level
         ## -----------------------------------
         if self.fit_continuum:
@@ -391,60 +389,50 @@ class MultiTransitLC(object):
 
     def plot(self, fig=0, tr_start=0, tr_stop=None, pdfpage=None):
         ##TODO: Plot excluded points
-        fig = pl.figure(fig)
-        ax1 = fig.add_subplot(2,1,1)
-        ax2 = fig.add_subplot(2,1,2)
-        fig.subplots_adjust(right=0.99, bottom=0.03, top=0.97, hspace=0.1)
+        fig = pl.figure(fig, figsize=[15,10])
+    
+        ntr = float(self.n_transits - tr_start if tr_stop is None else tr_stop-tr_start)
+        upl = [fig.add_subplot(2,ntr,i+1) for i in range(int(ntr))]
+        dpl = [fig.add_subplot(2,ntr,i+1+ntr) for i in range(int(ntr))]
 
-        ## Plot the individual transits
-        ## ============================
-        ## First we plot the individual transits from tr_start to tr_stop
-        ## together with the continuum fits (if they exist).
-        t_0 = 0.1*self.s
         for i, tr in enumerate(self.transits[tr_start:tr_stop]):
-            t_ot, f_ot = tr.get_transit(time=True, mask_transit=True)
             t_tt, f_tt = tr.get_transit(time=True, mask_transit=False)
-            t_fn, f_fn = tr.get_transit(time=False, mask_transit=False, cleaned=True, normalize=True)
 
-            t_it = t_tt[~tr.tmask]
-            f_it = f_tt[~tr.tmask]
+            mf = np.median(f_tt[tr.tmask])
+            df = 4*f_tt[tr.tmask].std()
+            tp = [t_tt[~tr.tmask][0], t_tt[~tr.tmask][-1], t_tt[~tr.tmask][-1], t_tt[~tr.tmask][0]]
 
-            t_it = t_it - t_tt[0] + t_0
-            t_ot = t_ot - t_tt[0] + t_0
-            t_tt = t_tt - t_tt[0] + t_0
+            upl[i].plot(t_tt[tr.tmask],f_tt[tr.tmask],'o', c='0.5', ms=2.5)
+            upl[i].plot(t_tt[~tr.tmask],f_tt[~tr.tmask],'o', c='0.0', ms=2.5)
+            upl[i].fill(tp, [mf+df, mf+df, mf-df, mf-df], alpha=0.05)
+            upl[i].plot([tr.t_center, tr.t_center], [mf-df, mf+df], c='0.5', ls='--', lw=1)
 
-            t_0 += 2.2*self.s
-            
-            ax1.plot(t_ot,f_ot,',', c='0.5')
-            ax1.plot(t_it,f_it,',', c='0.0')
-            ax1.axvline(t_0-0.1*self.s, c='0.0')
+            tt = np.linspace(tr.time[0], tr.time[-1], 200)
+            upl[i].plot(tt, tr.continuum_fit(tt-tr.t_center), c='0.9', lw=4)
+            upl[i].plot(tt, tr.continuum_fit(tt-tr.t_center), c='0.0', lw=2)
 
-            ax1.text(0.02+0.2*i, 0.1, '%3i'%(tr.number+1), transform = ax1.transAxes)
-            ax1.text(0.02+0.2*i, 0.2, '%5.2f'%(1e3*tr.dfdt), transform = ax1.transAxes)
+            fc = tr.continuum_fit.c
+            upl[i].text(0.015, 0.95, 'Transit {:3d}'.format(tr.number+1), transform = upl[i].transAxes)
+            upl[i].text(0.015, 0.115, 'Normalized linear slope\n {:8.5f}'.format(tr.dfdt), transform = upl[i].transAxes, size='small')
+            upl[i].text(0.015, 0.025, 'Normalized quadratic fit\n 1 {:+8.5f}x {:+8.5f}x^2'.format(fc[1]/fc[-1], fc[0]/fc[-1]), transform = upl[i].transAxes, size='small')
+            upl[i].set_xlim(t_tt[0], t_tt[-1])
 
-            if tr.continuum_fit is not None:
-                tt = np.linspace(tr.time[0], tr.time[-1], 200)
-                tp = np.linspace(t_ot[0], t_ot[-1], 200)
-
-                ax1.plot(tp, tr.continuum_fit(tt-tr.t_center), c='0.9', lw=4)
-                ax1.plot(tp, tr.continuum_fit(tt-tr.t_center), c='0.0', lw=2)
-
-            c = '0.25' if tr.number % 2 == 0 else '0.0'
-            ax2.plot(t_tt, f_fn, c=c)
+            std = tr.get_std()
+            t_fn, f_fn = tr.get_transit(time=True, mask_transit=False, cleaned=True, normalize=True)
+            dpl[i].plot(t_fn, f_fn, '-', c='0')
+            dpl[i].plot(t_fn, f_fn, '.', c='0')
+            dpl[i].set_xlim(t_fn[0], t_fn[-1])
+            dpl[i].axhline(1+3*std, c='0', ls=':')
+            dpl[i].axhline(1-6*std, c='0', ls=':')
 
         ymargin = 0.01*(self.flux.max() - self.flux.min())
-        ax1.set_ylim(self.flux.min()-ymargin, self.flux.max()+ymargin)
 
-        if tr_stop is not None:
-            ax1.set_xlim(0, (tr_stop-tr_start)*2.2*self.s)
-            ax2.set_xlim(0, (tr_stop-tr_start)*2.2*self.s)
-        else:
-            ax1.set_xlim(0, (self.n_transits-tr_start)*2.2*self.s)
-            ax2.set_xlim(0, (self.n_transits-tr_start)*2.2*self.s)
+        pl.setp(upl, ylim=(self.flux.min()-ymargin, self.flux.max()+ymargin))
+        pl.setp(dpl, ylim=((self.flux.min()-ymargin)/self.flux.mean(), (self.flux.max()+ymargin)/self.flux.mean()))
+        pl.setp((upl[1:], dpl[1:]), yticks=[])
+        pl.setp((upl, dpl), xticks=[])
 
-        ax1.set_xticks([])
-        ax2.set_xticks([])
-
+        fig.subplots_adjust(left=0.05, right=0.99, bottom=0.03, top=0.97, wspace=0.0, hspace=0.1)
         if pdfpage is not None: pdfpage.savefig()
 
 
