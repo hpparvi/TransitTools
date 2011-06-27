@@ -53,6 +53,7 @@ def main():
     op.add_option('', '--no-mcmc', dest='do_mcmc', action='store_false', default=True)
     op.add_option('', '--load-lcdata', dest='load_lcdata', action='store_true', default=False)
     op.add_option('', '--save-lcdata', dest='save_lcdata', action='store_true', default=False)
+    op.add_option('', '--plot-transits', dest='plot_transits', action='store_true', default=False)
 
     opt, arg = op.parse_args()
 
@@ -97,7 +98,7 @@ def main():
         else: fit_pars[p[0]] = float(p[1])
 
     fit_pars['n_threads'] = cp.getint('General','n_threads')
-    
+
     np.set_printoptions(precision=5)
     np.random.seed(0)
     INF = 1e8
@@ -182,12 +183,12 @@ def main():
     ## Clean the data using the initial fit
     ## ====================================
     if is_root:
-        #plot_transits(500, data, ct, '%s_initial_transits.pdf'%ct.basename)
+        if opt.plot_transits: plot_transits(500, data, ct, '%s_initial_transits.pdf'%ct.basename)
         tp = TransitParameterization('physical', mres.ephemeris)
         for i, d in enumerate(data):
             lc = TransitLightcurve(tp, ldpar=mres.ldc[i], method='fortran', mode='time')
             d.clean_with_lc(lc, top=3., bottom=3.)
-        #plot_transits(600, data, ct, '%s_cleaned_transits.pdf'%ct.basename, lc)
+        if opt.plot_transits: plot_transits(600, data, ct, '%s_cleaned_transits.pdf'%ct.basename, lc)
 
     if with_mpi:
         data = mpi_comm.bcast(data)
