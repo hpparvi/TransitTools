@@ -64,9 +64,9 @@ def import_as_MTLC(ctarget, width=0.2, twidth=None, maxpts=None, **kwargs):
             flux.append(dat_d.field( channel_fits_names[ch]+'flux')[mask].copy().astype(np.float64))
             fdev.append(dat_d.field( channel_fits_names[ch]+'fluxdev')[mask].copy().astype(np.float64))
 
-    if remove_contamination:
-        for i in range(len(flux)):
-            flux[i] -= ctarget.contamination * flux[i]
+    #if remove_contamination:
+    #    for i in range(len(flux)):
+    #        flux[i] -= ctarget.contamination * np.median(flux[i])
 
     twidth = twidth or ctarget.transit_width
     maxpts = maxpts or -1 
@@ -160,7 +160,7 @@ C23 = CoRoT_target('EN2_STAR_MON_0105228856_20100408T223049_20100705T044435.fits
                    period = 3.6307667,
                    transit_center = 2455308.9488,
                    transit_width  = 3.823*h_to_d,
-                   stellar_parameters={'T':6440., 'vsini':40.0e3, 'logg': 4.26, 'M':2.525e30, 'R':9.53e8},
+                   stellar_parameters={'T':6440., 'vsini':40.0e3, 'logg': 4.26, 'M':1.098*solar_mass, 'R':9.53e8},
                    contamination = 0.045)
 
 CoRoT_targets = {1:C01, 2:C02, 3:C03, 4:C04, 5:C05, 7:C07, 8:C08, 10:C10, 11:C11, 23:C23}
