@@ -9,11 +9,11 @@ from geometry import Geometry
 from transitparameterization import TransitParameterization
 
 class TransitLightcurve(object):
-    def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time', method='fortran', eccentric=False, zeropoint=1., npol=500, n_threads=0):
+    def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time', method='fortran', eccentric=False, npol=500, n_threads=0):
         self.parm  = parm
         self.method = method
         self.mode  = mode
-        self.model = model if model is not None else Gimenez(method=method, mode=mode, zeropoint=zeropoint, n_threads=n_threads, npol=npol, eccentric=eccentric)
+        self.model = model if model is not None else Gimenez(method=method, mode=mode, n_threads=n_threads, npol=npol, eccentric=eccentric)
         self.orbit = orbit if orbit is not None else Geometry(mode=mode)
         self.ldpar = ldpar if ldpar is not None else []
         self.orbit.update(self.parm)
