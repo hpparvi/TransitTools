@@ -20,7 +20,6 @@ class Gimenez(TransitModel):
         self.n_threads = n_threads
         self.method = method
         self.mode = mode
-        self.zeropoint = zeropoint
         self.npol = npol
         self.nldc = 2
         self.eccentric = eccentric
@@ -47,7 +46,7 @@ class Gimenez(TransitModel):
         contamination = kwargs.get('contamination', 0.0)
 
         if self.method == 'python' or self.mode == 'phase':
-            return self.shape(z, r, asarray(u), contamination, self.npol, self.zeropoint, self.n_threads)
+            return self.shape(z, r, asarray(u), contamination, self.npol, self.n_threads)
         else:
             if self.type == 'fte':
                 e = kwargs.get('e',0.)

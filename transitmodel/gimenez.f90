@@ -131,30 +131,30 @@ contains
     wp = 2.5_fd*PI
     e0 = atan2(sqrt(1-e*e)*sin(wp), e+cos(wp))
     f0 = e0 - e*sin(e0)
- 
+
     n = 2._fd*PI/p
     !$omp parallel do private(j, k, f, ee, di, de, cosv, sinv, ecorr, cosvw) &
     !$omp shared(tmp1d1, a, i, t, t0, sini, w, e, n, f0, wp) default(none)
     do j=1,nt
        f  = n*(t(j)-t0) + f0
        ee = f+e*sin(f)
-       do k=1,15
+       do k=1,25
           di = f - ee + e*sin(ee)
-          de = 1 - e*cos(ee)
+          de = 1._fd - e*cos(ee)
           ee  = ee + di/de
           if (abs(di) < 2e-5_fd) exit
        end do
      
        cosv = (cos(ee)-e)/de
-       sinv = sin(ee)*sqrt(1-e*e)/de
-       ecorr=(1-e*e)/(1+e*cosv)
+       sinv = sin(ee)*sqrt(1._fd-e*e)/de
+       ecorr=(1._fd-e*e)/(1._fd+e*cosv)
        cosvw =cosv*cos(wp)+sinv*sin(wp)
 
-       tmp1d1(j) = a*ecorr*sqrt(1-cosvw**2*sini**2)
+       tmp1d1(j) = a*ecorr*sqrt(1._fd-cosvw**2*sini**2)
     end do
     !$omp end parallel do
 
-    call eval_p_d(tmp1d1(1:nt), r, u, npol, contamination, nthreads, nt, nu, res)
+    call eval_p_d(tmp1d1(1:nt), r, u, contamination, npol, nthreads, nt, nu, res)
   end subroutine eval_t_e_d
 
 !!$  subroutine eval_t_e_d(t, e, w, r, u, npol, t0, p, a, i, contamination, nthreads, nt, nu, res)
@@ -238,7 +238,7 @@ contains
     end do
     !$omp end parallel do
 
-    call eval_p_d(tmp1d1(1:nt), r, u, npol, contamination, nthreads, nt, nu, res)
+    call eval_p_d(tmp1d1(1:nt), r, u, contamination, npol, nthreads, nt, nu, res)
   end subroutine eval_t_d
 
   subroutine eval_p_d(z, r, u, contamination, npol, nthreads, npt, nldc, res)

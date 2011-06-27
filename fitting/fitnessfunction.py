@@ -31,6 +31,7 @@ class FitnessFunction(object):
         self.nch  = len(data)
         self.chid = range(self.nch)
 
+        self.contamination = kwargs.get('contamination', 0.)
         self.eccentric = kwargs.get('eccentric',False)
         if self.eccentric:
             self.eccentricity = kwargs['eccentricity']
@@ -74,11 +75,11 @@ class FitnessFunction(object):
             self.ivars[i] *= kwargs.get('ivar_multiplier', 1.)
 
         method   = kwargs.get('method', 'fortran')
-        npol     = kwargs.get('n_pol', 250)
+        npol     = kwargs.get('n_pol', 500)
         nthreads = kwargs.get('n_threads', 1)
 
         self.lc = TransitLightcurve(TransitParameterization('kipping', [0.1,0,5,10,0]),
-                                    method=method, ldpar=[0], zeropoint=1., n_threads=nthreads, npol=npol,
+                                    method=method, ldpar=[0], n_threads=nthreads, npol=npol,
                                     eccentric=self.eccentric)
 
         self.fitfun_code = ""
@@ -137,7 +138,7 @@ class FitnessFunction(object):
             addl(c, "    chi = 0.")
             #addl(c, '    zp = array([self.gz(i_ch) for i_ch in range(self.nch)])')
             for ch in range(len(self.data)):
-                addl(c, '    model = self.gz({ch}) * self.lc(self.times[{ch}], kp, ld{ch}{ecc_str})'.format(ch=ch,ecc_str=ecc_str))
+                addl(c, '    model = self.gz({ch}) * self.lc(self.times[{ch}], kp, ld{ch}{ecc_str},contamination=self.contamination)'.format(ch=ch,ecc_str=ecc_str))
                 addl(c, '    chi += chi_sqr(self.fluxes[{ch}], model, self.ivars[{ch}])'.format(ch=ch))
                 #addl(c, '    print self.gk({ch}), self.gl({ch})'.format(ch=ch))
 
