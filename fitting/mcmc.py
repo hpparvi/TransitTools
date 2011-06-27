@@ -114,7 +114,6 @@ class MCMC(object):
             print "Error: no sigma given for parameter %s" %name
             sys.exit()
 
-            
         self.p0 = asarray([p.start_value for p in self.parameters])
         self.p  = self.p0.copy()
         
@@ -145,11 +144,11 @@ class MCMC(object):
         Notes:
           The likelihood ratios are supposed to be premultiplied by the error scale factor b.
         """
-        if prior_ratio < 0: 
+        if prior_ratio <= 0: # This should never ever happen! Find the bug!
             return False
         else:
-            trm = 0.5*( self.n_points*log(error_ratio) + X0 - Xt)
-            if trm > 200 or np.random.random() < prior_ratio*exp(trm):
+            log_posterior = log(prior_ratio) + 0.5*( self.n_points*log(error_ratio) + X0 - Xt)
+            if log_posterior > 0 or np.random.random() < exp(log_posterior):
                 return True
             else:
                 return False
@@ -157,6 +156,7 @@ class MCMC(object):
 
     def __call__(self):
         curses.wrapper(self._mcmc)
+        #self._mcmc()
         return self.result
 
     def _mcmc(self, *args):
@@ -252,20 +252,22 @@ class MCMC(object):
         nrows = self.n_parms/2+1
         ncols = 6
         for ip in range(self.n_parms):
-            d = self.result.steps[0,:i_s,ip]
             ax_chain = fig.add_subplot(nrows,ncols,ip*3+1)
             ax_hist  = fig.add_subplot(nrows,ncols,ip*3+2)
             ax_acorr = fig.add_subplot(nrows,ncols,ip*3+3)
-
             pl.text(0.035, 0.85, self.p_names[ip],transform = ax_chain.transAxes,
                     backgroundcolor='1.0', size='large')
-            ax_chain.plot(self.result.steps[0,:i_s,ip])
-            ax_hist.hist(d)
-            ax_acorr.acorr(d-d.mean(), maxlags=75, usevlines=True)
+
+            for ch in range(chain+1):
+                d = self.result.steps[ch,:i_s,ip]
+                ax_chain.plot(d)
+                ax_hist.hist(d)
+                ax_acorr.acorr(d-d.mean(), maxlags=40, usevlines=True)
+
             ax_acorr.axhline(1./np.e, ls='--', c='0.5')
             pl.setp([ax_chain, ax_hist, ax_acorr], yticks=[])
             pl.setp(ax_chain, xlim=[0,i_s])
-            pl.setp(ax_acorr, xlim=[-75,75], ylim=[0,1])
+            pl.setp(ax_acorr, xlim=[-40,40], ylim=[0,1])
         pl.subplots_adjust(top=0.99, bottom=0.02, left=0.01, right=0.99, hspace=0.2, wspace=0.04)
         pl.savefig('mcmcdebug_n%i_%i.pdf'%(mpi_rank,chain))
 
@@ -318,28 +320,14 @@ class MCMCResult(FitResult):
 
         #self.get_results = self.__call__
 
-    def __call__(self, parameter=None, burn_in=None, cor_len=None, separate_chains=False):
+    def __call__(self, parameter=None, burn_in=None, thinning=None):
         """Returns the results."""
 
-        burn_in = burn_in if burn_in is not None else self.burn_in
-        burn_in = int(burn_in*self.n_steps)
-        cor_len = cor_len if cor_len is not None else self.cor_len
-        
-        if parameter is None:
-            r = self.steps[:, burn_in::cor_len, :]
-        else:
-            i = self.p_names.index(parameter)
-            r = self.steps[:, burn_in::cor_len, i]
-       
-        if parameter is not None:
-            return r if separate_chains else r.ravel()
-        else:
-            if separate_chains:
-                return r
-            else:
-                rt = np.split(r, self.n_chains, 0)
-                return np.concatenate(rt, 1)[0, :, :]
-    
+        burn_in  = burn_in or self.burn_in
+        thinning = thinning or self.cor_len
+        i = list(self.p_names).index(parameter)
+        return self.steps[:, burn_in::thinning, i].ravel()
+
     def get_acceptance(self):
         """Returns the acceptance ratio for the parameters."""
         t = self.accepted.sum(0)

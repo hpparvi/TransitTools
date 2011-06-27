@@ -10,6 +10,8 @@ from __future__ import division
 import sys
 import time
 import numpy as np
+import matplotlib as mpl
+mpl.use('Agg')
 import pylab as pl
 import scipy as sp
 import pyfits as pf
@@ -204,7 +206,6 @@ class PTMCMC(object):
             print "Error: no sigma given for parameter %s" %name
             sys.exit()
 
-            
         self.p0 = asarray([p.start_value for p in self.parameters])
         self.p  = self.p0.copy()
         
@@ -276,7 +277,7 @@ class PTMCMC(object):
 
                 ## State swapping
                 #if i_s>self.autotune_length and random() < 1./30.:
-                if random() < 1./20.:
+                if random() < 0.1:
                     ic = randint(0, self.n_chains_l-1)
                     swap = self.chains[ic].try_swapping(self.chains[ic+1])
                     if swap: self.swaps.append(i_s)
@@ -435,29 +436,13 @@ class MCMCResult(FitResult):
         self.chi      = np.zeros([n_chains, n_steps])
         self.accepted = np.zeros([n_chains, n_parms, 2])
 
-        #self.get_results = self.__call__
-
-    def __call__(self, parameter=None, burn_in=None, cor_len=None, separate_chains=False):
+    def __call__(self, parameter, burn_in=None, thinning=None):
         """Returns the results."""
+        burn_in  = burn_in or self.burn_in
+        thinning = thinning or self.cor_len
+        i = list(self.p_names).index(parameter)
+        return self.steps[0, burn_in::thinning, i]
 
-        burn_in = burn_in if burn_in is not None else self.burn_in
-        burn_in = int(burn_in*self.n_steps)
-        cor_len = cor_len if cor_len is not None else self.cor_len
-        
-        if parameter is None:
-            r = self.steps[:, burn_in::cor_len, :]
-        else:
-            i = self.p_names.index(parameter)
-            r = self.steps[:, burn_in::cor_len, i]
-       
-        if parameter is not None:
-            return r if separate_chains else r.ravel()
-        else:
-            if separate_chains:
-                return r
-            else:
-                rt = np.split(r, self.n_chains, 0)
-                return np.concatenate(rt, 1)[0, :, :]
     
     def get_acceptance(self):
         """Returns the acceptance ratio for the parameters."""
