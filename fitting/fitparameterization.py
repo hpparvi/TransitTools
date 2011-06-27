@@ -363,7 +363,7 @@ class MTFitParameterization(object):
         ## ================================
         self.l_min = concatenate([repeat(0.0, count_parameter('k2')),
                                   repeat(0.9, count_parameter('zp')),
-                                  [0.0]    *  count_parameter('tc'),
+                                  [-1e10]    *  count_parameter('tc'),
                                   [0.0]    *  count_parameter('p'),
                                   [0.0] if self.fit_transit_width else [],
                                   ldp_min,
@@ -410,12 +410,15 @@ class MTFitParameterization(object):
 
         if not self.fit_impact_parameter:
             return "self.constant_parameters[%i]" %cpi['b2']
-        elif not self.fit_limb_darkening or self.separate_ld or self.n_ldc == 1:
+        elif not self.fit_limb_darkening or self.separate_ld:
             return "self.fitted_parameters[%i]" %fpi['b2']
-        else:
-            n1 = 'b2 + u' if self.n_ldc == 1 else 'b2 + u + v'
-            n2 = 'b2 - u' if self.n_ldc == 1 else 'b2 - u - v'
-            return "0.5 * (%s[%i] + %s[%i])"%(fp, fpi[n1], fp, fpi[n2])
+
+        # elif not self.fit_limb_darkening or self.separate_ld or self.n_ldc == 1:
+        #     return "self.fitted_parameters[%i]" %fpi['b2']
+        # else:
+        #     n1 = 'b2 + u' if self.n_ldc == 1 else 'b2 + u + v'
+        #     n2 = 'b2 - u' if self.n_ldc == 1 else 'b2 - u - v'
+        #     return "0.5 * (%s[%i] + %s[%i])"%(fp, fpi[n1], fp, fpi[n2])
 
     def _generate_b2_getter(self):
         src  = "def get_b2(self, ch=0, tn=0, p_in=None):\n"
@@ -470,7 +473,7 @@ class MTFitParameterization(object):
                     return "[0.5*(%s - %s), 0.5*(%s - %s)]"%(id1, id3, id2, id3)
             else:
                 if self.n_ldc == 1:
-                    return "self.fitted_parameters[%i+ch]"%fpi['u0']
+                    return "[self.fitted_parameters[%i+ch]]"%fpi['u0']
                 else:
                     n1 = "self.fitted_parameters[%i+2*ch]"%fpi['u0 + v0']
                     n2 = "self.fitted_parameters[%i+2*ch]"%fpi['u0 - v0']
