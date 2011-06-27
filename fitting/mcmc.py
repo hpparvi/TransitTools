@@ -176,7 +176,7 @@ class MCMC(object):
             i_at = 0
             P_try = P_cur.copy()
             prior_try = prior_cur.copy()
-            for i_s in xrange(self.n_steps):
+            for i_s in xrange(self.autotune_length):
                 self.i_step = i_s
                 for i_t in xrange(self.thinning):
                     for i_p, p in enumerate(self.parameters):
@@ -221,6 +221,54 @@ class MCMC(object):
                     self.result.save(self.sname)
 
                 self.ui.update()
+
+
+
+
+            for i_p, p in enumerate(self.parameters):
+                p._draw_method.sigma *= 0.25
+
+            for i_s in xrange(self.autotune_length, self.n_steps):
+                self.i_step = i_s
+                for i_t in xrange(self.thinning):
+
+                    for i_p, p in enumerate(self.parameters):
+                        P_try[i_p] = p.draw(P_cur[i_p])
+                        prior_try[i_p] = p.prior(P_try[i_p])
+
+                    X_try =  self.chifun(P_try[:-1])
+
+                    prior_ratio = prior_try.prod() / prior_cur.prod()
+                    error_ratio = P_try[-1] / P_cur[-1]
+
+                    self.result.accepted[chain, :, 0] += 1
+
+                    if X_try < 1e17 and self.acceptStep(P_cur[-1]*X_cur, P_try[-1]*X_try, prior_ratio, error_ratio):
+                        P_cur[:] = P_try[:]
+                        prior_cur[:] = prior_try[:]
+                        X_cur = X_try
+                        self.result.accepted[chain, :, 1] += 1
+                        at_test[:] += 1
+                    else:
+                        P_try[:] = P_cur[:]
+
+                self.result.steps[chain, i_s, :] = P_cur[:]
+                self.result.chi[chain, i_s] = X_cur
+
+                ## MONITORING
+                ## ==========
+                if self.monitor and (i_s+1)%self.minterval == 0:
+                    self.plot_simulation_progress(i_s, chain)
+
+                if (i_s+1)%self.sinterval == 0:
+                    self.result.save(self.sname)
+
+                self.ui.update()
+
+
+
+
+
 
         ## MPI communication
         ## =================
@@ -276,6 +324,9 @@ class MCMCCursesUI(object):
         self.mcmc = mcmc
         
         self.screen = curses.initscr()
+
+        curses.use_default_colors()
+
         self.height, self.width = self.screen.getmaxyx()
         self.main_window = CTitleWindow('MCMC', self.width, self.height, 0, 0)
 
