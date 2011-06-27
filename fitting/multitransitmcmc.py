@@ -13,6 +13,7 @@ from fitnessfunction import FitnessFunction
 from transitfitter import Fitter
 from mcmc import MCMC
 from ptmcmc import PTMCMC
+from gibbsmcmc import GibbsMCMC
 
 class MultiTransitMCMC(Fitter):
     def __init__(self, lcdata, pars, stellar_prm, parameter_defs, p0, mcmc_pars={}, **kwargs):
@@ -31,7 +32,7 @@ class MultiTransitMCMC(Fitter):
         self.fitfun = FitnessFunction(self.p, lcdata, **kwargs)
  
         #self.fitter = PTMCMC(self.fitfun, parameter_defs, **mcmc_pars)
-        self.fitter = MCMC(self.fitfun, parameter_defs, **mcmc_pars)
+        self.fitter = GibbsMCMC(self.fitfun, parameter_defs, **mcmc_pars)
 
 
     def __call__(self):
