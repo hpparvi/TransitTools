@@ -1,4 +1,4 @@
-from math import exp, log, sqrt
+from math import exp, log, sqrt, pi
 
 class Prior(object):
     def __init__(self, a, b):
@@ -34,7 +34,7 @@ class GaussianPrior(Prior):
         self._f2 = 1./ (2.*std*std)
 
     def __call__(self, x):
-        return self._f1 * exp((x-self.mean)**2 * self._f2) if self.a < x < self.b else 0.
+        return self._f1 * exp(-(x-self.mean)**2 * self._f2) if self.a < x < self.b else 0.
         
 mcmcpriors = {'uniform':UniformPrior,
               'jeffreys':JeffreysPrior,
