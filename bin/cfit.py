@@ -15,7 +15,8 @@ import sys
 
 from optparse import OptionParser
 import cPickle
-
+import matplotlib as mpl
+#mpl.use('Agg')
 import matplotlib.pyplot as pl
 import numpy as np
 
@@ -31,7 +32,7 @@ from transitLightCurve.transitparameterization import TransitParameterization
 
 from transitLightCurve.fitting.fitparameterization import MTFitParameter
 from transitLightCurve.fitting.mcmc import DrawGaussian
-from transitLightCurve.fitting.mcmcprior import UniformPrior, JeffreysPrior
+from transitLightCurve.fitting.mcmcprior import UniformPrior, GaussianPrior, JeffreysPrior
 
 import transitLightCurve.io.corot as CoRoT
 from transitLightCurve.io.corot import CoRoT_targets, import_as_MTLC
@@ -73,10 +74,15 @@ def main():
     ct = CoRoT_targets[int(cp.get('General','name')[1:])]
     channels = ['w'] if ct in  [CoRoT_targets[10]] else ['r','g','b']
 
-    de_pars = {'npop':cp.getint('Initial DE','npop'),
-               'ngen':cp.getint('Initial DE','ngen'),
-               'C':cp.getfloat('Initial DE','C'),
-               'F':cp.getfloat('Initial DE','F')}
+    de_init_pars = {'npop':cp.getint('Initial DE','npop'),
+                    'ngen':cp.getint('Initial DE','ngen'),
+                    'C':cp.getfloat('Initial DE','C'),
+                    'F':cp.getfloat('Initial DE','F')}
+
+    de_final_pars = {'npop':cp.getint('Final DE','npop'),
+                     'ngen':cp.getint('Final DE','ngen'),
+                     'C':cp.getfloat('Final DE','C'),
+                     'F':cp.getfloat('Final DE','F')}
 
     ds_pars = {'ftol':1e-4, 'disp':False}
 
@@ -86,7 +92,10 @@ def main():
 
     fit_pars = dict(cp.items('Fitting'))
     for p in fit_pars.items():
-        fit_pars[p[0]] = p[1].lower() == 'true'
+        if p[1].lower() == 'true': fit_pars[p[0]] = True
+        elif p[1].lower() == 'false': fit_pars[p[0]] = False
+        else: fit_pars[p[0]] = float(p[1])
+
     fit_pars['n_threads'] = cp.getint('General','n_threads')
     
     np.set_printoptions(precision=5)
@@ -128,7 +137,7 @@ def main():
                               ps_period=CoRoT.orbit_period)
 
 
-    def fit_corot(ct, data, fitparameters):
+    def fit_corot(ct, data, fitparameters, de_pars):
         return fit_multitransit(data, fitparameters,
                                 ct.stellar_parameters,
                                 de_pars=de_pars,
@@ -164,7 +173,7 @@ def main():
     ## Initial fit
     ## ===========
     if do_initial_fit:
-        mres = fit_corot(ct, data, fpars)
+        mres = fit_corot(ct, data, fpars, de_init_pars)
         if is_root:  mres.save(fn_initial)
         if with_mpi: mres = mpi_comm.bcast(mres)
     else:
@@ -173,12 +182,12 @@ def main():
     ## Clean the data using the initial fit
     ## ====================================
     if is_root:
-        plot_transits(500, data, ct, '%s_initial_transits.pdf'%ct.basename)
+        #plot_transits(500, data, ct, '%s_initial_transits.pdf'%ct.basename)
         tp = TransitParameterization('physical', mres.ephemeris)
         for i, d in enumerate(data):
             lc = TransitLightcurve(tp, ldpar=mres.ldc[i], method='fortran', mode='time')
             d.clean_with_lc(lc, top=3., bottom=3.)
-        plot_transits(600, data, ct, '%s_cleaned_transits.pdf'%ct.basename)
+        #plot_transits(600, data, ct, '%s_cleaned_transits.pdf'%ct.basename, lc)
 
     if with_mpi:
         data = mpi_comm.bcast(data)
@@ -186,7 +195,7 @@ def main():
     ## Final fit
     ## ==========
     if do_final_fit:
-        mres = fit_corot(ct, data, fpars)
+        mres = fit_corot(ct, data, fpars, de_final_pars)
         if is_root: mres.save(fn_final)
         if with_mpi: mres = mpi_comm.bcast(mres)
     else:
@@ -218,6 +227,8 @@ def main():
                         mres.parameterization.p_cur):
 
             pt = eval(cp.get('MCMC Parameters',p))
+
+            print p, pt
 
             parameter_defs[p] = {'start_value':v,
                                  'draw_function': DrawGaussian(pt['sigma']),
@@ -264,7 +275,7 @@ def main():
 
         # print mcmcres.get_acceptance()
         # pl.show()
-        sys.exit()
+        # sys.exit()
 
     ##########################################################################################
     ##
@@ -339,15 +350,15 @@ def main():
 
     pp.close()
 
-def plot_transits(figi, data, ct, filename):
+def plot_transits(figi, data, ct, filename, lc_solution=None):
     pp = PdfPages(filename)
     for i, d in enumerate(data):
         nt = d.n_transits
         npg = nt // 5
         for j in range(npg):
-            d.plot(figi, j*5, (j+1)*5, pp)
+            d.plot(figi, j*5, (j+1)*5, pp, lc_solution)
             figi += 1
-        d.plot(figi, npg*5, npg*5+nt%5, pp)
+        d.plot(figi, npg*5, npg*5+nt%5, pp, lc_solution)
         figi += 1
     pp.close()
 
