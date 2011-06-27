@@ -1,5 +1,4 @@
 import numpy as np
-
 from scipy.special import jacobi, gamma, gammaln
 from numpy import exp, asarray
 
@@ -16,7 +15,7 @@ class Gimenez(TransitModel):
     """Implements the transit model by A. Gimenez (A&A 450, 1231--1237, 2006).
     Adapted from the code at http://thor.ieec.uab.es/LRVCode"""
 
-    def __init__(self, method='python', mode='time', n_threads=0, zeropoint=1., npol=500, float_t=np.float64):
+    def __init__(self, method='python', mode='time', n_threads=0, npol=500, eccentric=False, float_t=np.float64):
         self.float_t = float_t
         self.n_threads = n_threads
         self.method = method
@@ -24,21 +23,38 @@ class Gimenez(TransitModel):
         self.zeropoint = zeropoint
         self.npol = npol
         self.nldc = 2
+        self.eccentric = eccentric
 
         if method == 'python':
             self.shape   = self._shape_py
+            self.type = 'p'
         elif method == 'fortran' and with_gimenez_f:
             gimenez_f.gimenez.init(npol, self.nldc)
-            if self.mode == 'time':
-                self.shape = gimenez_f.gimenez.eval_t_d
+            if not self.eccentric:
+                if self.mode == 'time':
+                    self.shape = gimenez_f.gimenez.eval_t_d
+                    self.type = 'ftc'
+                else:
+                    self.shape = gimenez_f.gimenez.eval_p_d
+                    self.type = 'fpc'
             else:
-                self.shape = gimenez_f.gimenez.eval_p_d
+                if self.mode == 'time':
+                    self.shape = gimenez_f.gimenez.eval_t_e_d
+                    self.type = 'fte'
+
             
-    def __call__(self, z, r, u=[], t0=0, p=0, a=0, i=0):
+    def __call__(self, z, r, u=[], t0=0, p=0, a=0, i=0, **kwargs):
+        contamination = kwargs.get('contamination', 0.0)
+
         if self.method == 'python' or self.mode == 'phase':
-            return self.shape(z, r, asarray(u), self.npol, self.zeropoint, self.n_threads)
+            return self.shape(z, r, asarray(u), contamination, self.npol, self.zeropoint, self.n_threads)
         else:
-            return self.shape(z, r, asarray(u), self.npol, t0, p, a, i, self.n_threads)
+            if self.type == 'fte':
+                e = kwargs.get('e',0.)
+                w = kwargs.get('w',0.)
+                return self.shape(z, e, w, r, asarray(u), self.npol, t0, p, a, i, contamination, self.n_threads)
+            else:
+                return self.shape(z, r, asarray(u), self.npol, t0, p, a, i, contamination, self.n_threads)
 
     def __del__(self):
         if self.method == 'fortran' and with_gimenez_f:

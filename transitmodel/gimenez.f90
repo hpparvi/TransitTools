@@ -41,6 +41,9 @@ module gimenez
   integer, parameter :: FS = C_FLOAT
   integer, parameter :: FD = C_DOUBLE
 
+  real(8), parameter :: PI = 3.1415926525_fd
+  real(8), parameter :: HALF_PI = 0.5_fd * PI
+
   real(8), allocatable, dimension(:,:) :: a_e_nm, a_e_vl
   real(8), allocatable, dimension(:,:,:) :: j_d, j_e
   real(8), allocatable, dimension(:) :: tmp1d1, tmp1d2
@@ -102,50 +105,149 @@ contains
     if (allocated(j_e)) deallocate(j_e)
   end subroutine finalize
 
-  subroutine eval_t_d(t, r, u, npol, t0, p, a, i, nthreads, nt, nu, res)
+  
+
+  subroutine eval_t_e_d(t, e, w, r, u, npol, t0, p, a, i, contamination, nthreads, nt, nu, res)
     use omp_lib
     implicit none
     integer, intent(in) :: nt, nu, nthreads, npol
     real(8), intent(in), dimension(nt) :: t
     real(8), intent(in), dimension(nu) :: u
-    real(8), intent(in) :: r, t0, p, a, i
+    real(8), intent(in) :: e, w, r, t0, p, a, i, contamination
     real(8), intent(out), dimension(nt) :: res
 
     real(8), external :: fastcos, fastsin
 
-    real(8) :: ph, sn, sinph, cosph
+    real(8) :: wp, e0, f0, f, ee, n, ecorr, cosvw, sinv, cosv, di, de, sini
+    real(8) :: th, th0, tr, ph, sn, sinph, cosph, mean_anomaly, true_anomaly
     real(8), dimension(nt) :: z
 
     real(8) :: p_inv
-    integer :: j
+    integer :: j, k
 
-    !! Calculate the phase given time, zero epoch, and orbital parameters for a circular orbit.
-    !!
-    !! Note: currently assumes zero eccentricity, an implementation with nonzero eccentricity
-    !!       is needed as well.
-    !!
-    p_inv = 1._fd/p
-   !$omp parallel do private(j, ph, sn, sinph, cosph) shared(tmp1d1, a, i, t, t0, p_inv) default(none)
+    !$ if (nthreads /= 0) call omp_set_num_threads(nthreads)
+
+    sini = sin(i)
+    wp = 2.5_fd*PI
+    e0 = atan2(sqrt(1-e*e)*sin(wp), e+cos(wp))
+    f0 = e0 - e*sin(e0)
+ 
+    n = 2._fd*PI/p
+    !$omp parallel do private(j, k, f, ee, di, de, cosv, sinv, ecorr, cosvw) &
+    !$omp shared(tmp1d1, a, i, t, t0, sini, w, e, n, f0, wp) default(none)
     do j=1,nt
-       ph = (t(j)-t0)*p_inv                                                  !phase -1 -- 1
-       sn = sign(1._fd, -(mod(ph + 0.25_fd, 1._fd) - 0.5_fd))         !sign
-       ph = 6.28318_fd*ph                                             !phase -2pi -- 2pi
-       call fastsincos(ph, sinph, cosph)
-       !tmp1d1(j) = sn*a*sqrt(fastsin(ph)**2 + (fastcos(i)*fastcos(ph))**2)        !projected distance z     
-       tmp1d1(j) = sn*a*sqrt(sinph**2 + (fastcos(i)*cosph)**2)        !projected distance z     
+       f  = n*(t(j)-t0) + f0
+       ee = f+e*sin(f)
+       do k=1,15
+          di = f - ee + e*sin(ee)
+          de = 1 - e*cos(ee)
+          ee  = ee + di/de
+          if (abs(di) < 2e-5_fd) exit
+       end do
+     
+       cosv = (cos(ee)-e)/de
+       sinv = sin(ee)*sqrt(1-e*e)/de
+       ecorr=(1-e*e)/(1+e*cosv)
+       cosvw =cosv*cos(wp)+sinv*sin(wp)
+
+       tmp1d1(j) = a*ecorr*sqrt(1-cosvw**2*sini**2)
     end do
     !$omp end parallel do
 
-    call eval_p_d(tmp1d1(1:nt), r, u, npol, 1._fd, nthreads, nt, nu, res)
+    call eval_p_d(tmp1d1(1:nt), r, u, npol, contamination, nthreads, nt, nu, res)
+  end subroutine eval_t_e_d
+
+!!$  subroutine eval_t_e_d(t, e, w, r, u, npol, t0, p, a, i, contamination, nthreads, nt, nu, res)
+!!$    use omp_lib
+!!$    implicit none
+!!$    integer, intent(in) :: nt, nu, nthreads, npol
+!!$    real(8), intent(in), dimension(nt) :: t
+!!$    real(8), intent(in), dimension(nu) :: u
+!!$    real(8), intent(in) :: e, w, r, t0, p, a, i
+!!$    real(8), intent(out), dimension(nt) :: res
+!!$
+!!$    real(8), external :: fastcos, fastsin
+!!$
+!!$    real(8) :: fp1, fp2, fp3, n, sini, cosi, sinw, cosw
+!!$    real(8) :: th, th0, tr, ph, sn, sinph, cosph, mean_anomaly, true_anomaly
+!!$    real(8), dimension(nt) :: z
+!!$
+!!$    real(8) :: p_inv
+!!$    integer :: j
+!!$
+!!$    !$ if (nthreads /= 0) call omp_set_num_threads(nthreads)
+!!$
+!!$    fp1  = 2._fd*e - 0.25_fd*e*e*e
+!!$    fp2  = 1.25_fd*e*e
+!!$    fp3  = (13._fd/12._fd)*e*e*e
+!!$    call fastsincos(i, sini, cosi)
+!!$    call fastsincos(w, sinw, cosw)
+!!$
+!!$    tr = -w + HALF_PI
+!!$    tr = tr + fp1*fastsin(tr) + fp2*fastsin(2._fd*tr) + fp3*fastsin(3._fd*tr)
+!!$
+!!$    th0 = 0._fd
+!!$    do j=1,10
+!!$       th0 = atan(-e*cosw*cosi**2 / (cos(th0)*sini**2+e*sinw))
+!!$    end do
+!!$
+!!$    n = 6.28318_fd/p
+!!$    !$omp parallel do private(j, ph, sn, sinph, cosph, mean_anomaly, true_anomaly, th) &
+!!$    !$omp shared(tmp1d1, a, i, t, t0, th0, sini, w, fp1, fp2, fp3, tr, e, n) default(none)
+!!$    do j=1,nt
+!!$       mean_anomaly = (t(j)-t0) * n - w + HALF_PI
+!!$       true_anomaly = mean_anomaly &
+!!$            & + fp1*fastsin(     mean_anomaly) &
+!!$            & + fp2*fastsin(2_fd*mean_anomaly) &
+!!$            & + fp3*fastsin(3_fd*mean_anomaly)
+!!$       th = true_anomaly - tr
+!!$       cosph = fastcos(th)
+!!$       tmp1d1(j) = a*sign(1._fd, cosph)* (1._fd-e*e)/(1._fd-e*fastsin(th-w)) * sqrt(1._fd - cosph**2*sini**2)
+!!$    end do
+!!$    !$omp end parallel do
+!!$
+!!$    call eval_p_d(tmp1d1(1:nt), r, u, npol, contamination, nthreads, nt, nu, res)
+!!$  end subroutine eval_t_e_d
+
+  subroutine eval_t_d(t, r, u, npol, t0, p, a, i, contamination, nthreads, nt, nu, res)
+    use omp_lib
+    implicit none
+    integer, intent(in) :: nt, nu, nthreads, npol
+    real(8), intent(in), dimension(nt) :: t
+    real(8), intent(in), dimension(nu) :: u
+    real(8), intent(in) :: r, t0, p, a, i, contamination
+    real(8), intent(out), dimension(nt) :: res
+
+    real(8), external :: fastcos, fastsin
+
+    real(8) :: ph, n, cosph, sini
+    real(8), dimension(nt) :: z
+    
+    integer :: j
+
+    !$ if (nthreads /= 0) call omp_set_num_threads(nthreads)
+
+    !! Calculate the phase given time, zero epoch, and orbital parameters for a circular orbit.
+
+    sini = fastsin(i)
+    n    = 6.28318_fd/p
+    !$omp parallel do private(j, ph, cosph) shared(tmp1d1, a, t, t0, sini, n) default(none)
+    do j=1,nt
+       cosph = fastcos((t(j)-t0)*n)
+       tmp1d1(j) = sign(1._fd, cosph)*a*sqrt(1._fd - cosph*cosph*sini*sini)
+    end do
+    !$omp end parallel do
+
+    call eval_p_d(tmp1d1(1:nt), r, u, npol, contamination, nthreads, nt, nu, res)
   end subroutine eval_t_d
 
-  subroutine eval_p_d(z, r, u, npol, zeropoint, nthreads, npt, nldc, res)
+  subroutine eval_p_d(z, r, u, contamination, npol, nthreads, npt, nldc, res)
     use omp_lib
     implicit none
     integer, intent(in) :: npt, nldc, nthreads, npol
     real(8), intent(in), dimension(npt) :: z
     real(8), intent(in), dimension(nldc) :: u
-    real(8), intent(in) :: r, zeropoint
+    real(8), intent(in) :: r, contamination
     real(8), intent(out), dimension(npt) :: res
     
     logical, dimension(npt) :: mask
@@ -153,7 +255,7 @@ contains
     !real(8) :: t_start, t_finish
 
     !t_start = mpi_wtime()
-    ! $ if (nthreads /= 0) call omp_set_num_threads(nthreads)
+    !$ if (nthreads /= 0) call omp_set_num_threads(nthreads)
 
     res  = 0._fd
     mask = (z > 0._fd) .and. (z < 1._fd+r)
@@ -163,7 +265,7 @@ contains
     tmp1d2(1:npt_t) = gimenez_v(tmp1d1(1:npt_t), u, r, npol)
     res   = unpack(tmp1d2(1:npt_t), mask, res)
 
-    res = zeropoint + res
+    res = 1._fd + res*(1._fd - contamination)
     !t_finish = mpi_wtime()
     !print *, t_finish - t_start
   end subroutine eval_p_d
