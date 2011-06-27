@@ -122,7 +122,7 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
 
     lcdata    = lcdata if isinstance(lcdata, list) else [lcdata]
     nchannels = len(lcdata)
-    totpoints = sum([d.time.size for d in lcdata]) 
+    totpoints = sum([d.npts for d in lcdata]) 
 
     ## Generate the fitting parameterization
     ## -------------------------------------
