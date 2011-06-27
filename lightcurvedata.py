@@ -10,16 +10,14 @@ except ImportError:
     info("Couldn't import spline from scipy.interpolate.")
 
 class SingleTransit(object):
-    def __init__(self, time, flux, err, ivar, tmask, bmask, number, t_center, g_range):
-        self.time = time
-        self.flux = flux
-        self.err  = err
-        self.ivar = ivar
-        self.tmask = tmask
+    def __init__(self, time, flux, err, ivar, tmask, bmask, number, t_center):
+        self.time = time.copy()
+        self.flux = flux.copy()
+        self.err  = err.copy()
+        self.ivar = ivar.copy()
+        self.tmask = tmask.copy()
         self.number = number
         self.t_center = t_center
-        self.g_range = g_range
-        self.g_range_s = np.s_[g_range[0]:g_range[1]]
 
         self.badpx_mask = bmask
         self.continuum_fit = None
@@ -30,27 +28,41 @@ class SingleTransit(object):
         self.zeropoint = self.flux[self.tmask].mean()
 
 
+    def get_npts(self, mask_transit=False):
+        return self.flux[self.badpx_mask].size
+
     def get_std(self, clean=True, normalize=True):
         return self.get_flux(mask_transit=True, clean=clean, normalize=normalize).std()
 
-    def get_flux(self, mask_transit=False, clean=True, normalize=True):
+    def get_flux(self, mask_transit=False, clean=True, normalize=True, apply_bad_mask=True, invert_bad_mask=False):
         """Returns the observed flux.
         """
+        if apply_bad_mask:
+            bad_mask = ~self.badpx_mask if invert_bad_mask else self.badpx_mask 
+            mask = np.logical_and(bad_mask, self.tmask) if mask_transit else bad_mask
+        else:
+            mask = self.tmask if mask_transit else np.ones(self.time.size, dtype=np.bool)
+            
         if clean and self.continuum_fit is not None:
             cf = self.continuum_fit(self.time - self.t_center)
             flux = self.flux/cf if normalize else self.flux/cf*cf.mean()
         else:
             flux = self.flux.copy() if not normalize else self.flux / np.median(self.flux[self.tmask])
                 
-        return flux if not mask_transit else flux[self.tmask]
+        return flux[mask]
 
     
     def get_time(self, mask_transit=False):
-        return self.time.copy() if not mask_transit else self.time[self.tmask].copy()
+        mask = np.logical_and(self.badpx_mask, self.tmask) if mask_transit else self.badpx_mask
+        return self.time[mask].copy()
 
+
+    def get_rejected_points(self, normalize=True):
+        return self.time[~self.badpx_mask], self.get_flux(normalize=normalize, invert_bad_mask=True)
 
     def get_transit(self, time=True, mask_transit=False, cleaned=None, normalize=False):
-        tdata = self.get_time(mask_transit) if time else np.arange(self.g_range[0], self.g_range[1])
+        if not time: raise NotImplementedError
+        tdata = self.get_time(mask_transit)
         fdata = self.get_flux(mask_transit, cleaned, normalize)
         return tdata, fdata
 
@@ -82,12 +94,12 @@ class SingleTransit(object):
         info("      Rejected %i outliers"%(~bmask).sum())
 
 
-    def clean_with_lc(self, lc_solution, n_iter=5, top=3., bottom=3.):
+    def clean_with_lc(self, lc_solution, n_iter=5, top=3., bottom=3., **kwargs):
         info("Cleaning data with an light curve solution", H1)
-        time = self.get_time()
-        flux = self.get_flux()
+        time = self.time
+        flux = self.get_flux(apply_bad_mask=False)
 
-        residuals = flux - lc_solution(time)
+        residuals = flux - lc_solution(time, **kwargs)
         badmask   = self.badpx_mask.copy()
 
         for i in range(n_iter):
@@ -196,14 +208,14 @@ class MultiTransitLC(object):
         if 'clean_pars' in kwargs.keys(): clean_pars.update(kwargs['clean_pars'])
         
         self.name  = name
-        self.phase = phase[mask]
-        self.time  = time[mask]
-        self.flux  = flux[mask]
-        self.ferr  = err[mask]
-        self.ivar  = np.ones(self.time.size) 
-        self.pntn  = np.arange(time.size)
-        self.badpx_mask = np.ones(self.time.size, np.bool)
-        self.tmask = otime[mask] > t_width if mtime else self.phase > t_width
+        phase = phase[mask]
+        time  = time[mask]
+        flux  = flux[mask]
+        ferr  = err[mask]
+        ivar  = np.ones(time.size) 
+        pntn  = np.arange(time.size)
+        badpx_mask = np.ones(time.size, np.bool)
+        tmask = otime[mask] > t_width if mtime else self.phase > t_width
 
         self.fit = None
         self.tw = t_width
@@ -213,7 +225,7 @@ class MultiTransitLC(object):
 
         self.transits = []
 
-        self.t_number = (self.time-tc)/p + 0.5
+        self.t_number = (time-tc)/p + 0.5
         self.t_number = np.round(self.t_number-self.t_number[0]).astype(np.int)
         self.n_transits = self.t_number[-1] + 1
 
@@ -222,23 +234,18 @@ class MultiTransitLC(object):
         ## Separate the lightcurve into transit-centered pieces of given width,
         ## each transit represented by a SingleTransit class.
         info('Separating transits',I1)
-        t = np.arange(self.time.size)
+        t = np.arange(time.size)
         for i in range(self.n_transits):
             b = self.t_number == i
             ## First check if we have any points corresponding the given transit
             ## number.
             if np.any(b):
-                r1 = t[b][0]; r2 = t[b][-1]+1
-                ## Next check if we actually have any in-transit points for the 
-                ## transits, reject the transit if not.
-                if np.any(~self.tmask[r1:r2]):
-                    self.transits.append(SingleTransit(self.time[r1:r2],
-                                                       self.flux[r1:r2],
-                                                       self.ferr[r1:r2],
-                                                       self.ivar[r1:r2],
-                                                       self.tmask[r1:r2],
-                                                       self.badpx_mask[r1:r2],
-                                                       i, self.time[r1:r2].mean(), [r1,r2]))
+                sl = np.s_[t[b][0]: t[b][-1]+1]
+                ## Check if we have any in-transit points for the transits, reject the transit if not.
+                if np.any(~tmask[sl]):
+                    self.transits.append(SingleTransit(time[sl], flux[sl], ferr[sl],
+                                                       ivar[sl], tmask[sl], badpx_mask[sl],
+                                                       i, time[sl].mean()))
                 else:
                     self.n_transits -= 1
             else:
@@ -257,32 +264,27 @@ class MultiTransitLC(object):
             for t in self.transits:
                 t.fit_continuum(**clean_pars)
 
-        ## Remove datapoints marked as bad
-        ## -------------------------------
-        logging.info('    Removing bad points')
-        self.clean(self.badpx_mask)
-
         ## Clean up a possible periodic signal if a period is given
         ## --------------------------------------------------------
-        if 'ps_period' in kwargs.keys():
-            logging.info('    Cleaning a periodic error signal')
-            for t in self.transits:
-                t.fit_periodic_signal(kwargs['ps_period'])
-        logging.info('')
+        # if 'ps_period' in kwargs.keys():
+        #     logging.info('    Cleaning a periodic error signal')
+        #     for t in self.transits:
+        #         t.fit_periodic_signal(kwargs['ps_period'])
+        # logging.info('')
 
         ## Remove transits with a high point-to-point scatter
         ## --------------------------------------------------
         logging.info('  Removing bad transits')
         self.update_stds()
         #self.remove_bad_transits()
+        self.update_stats()
 
         logging.info('')
-        logging.info('  Created a lightcurve with %i points'%self.time.size)
+        logging.info('  Created a lightcurve with {} points'.format(self.get_npts()))
         logging.info('')
         logging.info('  Mean   std %7.5f'%self.get_mean_std())
         logging.info('  Median std %7.5f'%self.get_median_std())
         logging.info('')
-
 
         #for i, tr in enumerate(self.transits):
         #    logging.info('%s %2i %+10.3f %+10.3f %+10.3f'%(self.name,i, (p0[i]-p0.mean())/p0e, (p1[i]- p1.mean())/p1e, (p2[i]-p2.mean())/p2e))
@@ -302,67 +304,33 @@ class MultiTransitLC(object):
             self.remove_transit(tn-i)
             i += 1
 
-
-
     def update_stds(self):
         std = []
         for tr in self.transits:
             tr.err[:] = tr.get_std(normalize=False)
             tr.ivar[:] = 1./tr.err**2
 
+    def update_stats(self):
+        self.npts = self.get_npts()
+        flux_r = self.get_flux(normalize=False)
+        flux_n = self.get_flux()
 
-    def clean(self, mask):
-        self.phase = self.phase[mask].copy()
-        self.time  = self.time[mask].copy()
-        self.flux  = self.flux[mask].copy()
-        self.ivar  = self.ivar[mask].copy()
-        self.pntn  = self.pntn[mask].copy()
-        self.badpx_mask = self.badpx_mask[mask].copy()
-        self.tmask = self.tmask[mask].copy()
-        self.t_number = self.t_number[mask].copy()
+        self.flux_r_max  = flux_r.max()
+        self.flux_r_min  = flux_r.min()
+        self.flux_r_mean = flux_r.mean()
+        self.flux_n_max  = flux_n.max()
+        self.flux_n_min  = flux_n.min()
+        self.flux_n_mean = flux_n.mean()
 
-        n = np.arange(self.time.size)
+    def clean_with_lc(self, lc, n_iter=5, top=5., bottom=5., **kwargs):
         for t in self.transits:
-            b = self.t_number == t.number
-            s = np.s_[n[b][0] : n[b][-1]+1]
-            t.time = self.time[s]
-            t.err  = self.ferr[s]
-            t.ivar = self.ivar[s]
-            t.flux = self.flux[s]
-            t.tmask = self.tmask[s]
-            t.badpx_mask = self.badpx_mask[s]
-            t.g_range = [s.start, s.stop]
-            t.g_range_s = s
-
-
-    def clean_with_lc(self, lc, n_iter=5, top=5., bottom=5.):
-        for t in self.transits:
-            t.clean_with_lc(lc, n_iter, top, bottom)
-
-        self.clean(self.badpx_mask)
+            t.clean_with_lc(lc, n_iter, top, bottom, **kwargs)
 
     def remove_transit(self, tn):
-        sl = self.transits[tn].g_range_s
-        npts = self.transits[tn].time.size
+        raise NotImplementedError
 
-        self.phase = np.delete(self.phase, sl)
-        self.time  = np.delete(self.time, sl)
-        self.flux  = np.delete(self.flux, sl)
-        self.ivar  = np.delete(self.ivar, sl)
-        self.pntn  = np.delete(self.pntn, sl)
-        self.badpx_mask = np.delete(self.badpx_mask, sl)
-        self.tmask = np.delete(self.tmask, sl)
-        self.t_number = np.delete(self.t_number, sl)
-
-        del self.transits[tn]
-        self.n_transits -= 1
-
-        for tr in self.transits[tn:]:
-            tr.number -= 1
-            tr.g_range[0] -= npts
-            tr.g_range[1] -= npts
-            tr_g_range_s = np.s_[tr.g_range[0]:tr.g_range[1]]
-
+    def get_npts(self, mask_transits=False):
+        return sum([tr.get_npts(mask_transits) for tr in self.transits])
 
     def get_time(self, mask_transits=False):
         return concatenate([tr.get_time(mask_transit=mask_transits) for tr in self.transits])
@@ -371,7 +339,7 @@ class MultiTransitLC(object):
         return concatenate([tr.get_flux(clean=True, mask_transit=mask_transits, normalize=normalize) for tr in self.transits])
 
     def get_std(self, normalize=True):
-        return concatenate([repeat(tr.get_std(normalize=normalize), tr.time.size) for tr in self.transits])
+        return concatenate([repeat(tr.get_std(normalize=normalize), tr.time[tr.badpx_mask].size) for tr in self.transits])
 
     def get_ivar(self, normalize=True):
         return 1./self.get_std(normalize=normalize)**2
@@ -383,11 +351,15 @@ class MultiTransitLC(object):
         return np.median(array([tr.get_std(normalize=normalize) for tr in self.transits]))
 
     def get_transit_slices(self):
-        return [tr.g_range_s for tr in self.transits]
-
-
-
-    def plot(self, fig=0, tr_start=0, tr_stop=None, pdfpage=None):
+        slices = []
+        start = 0
+        for tr in self.transits:
+            end = tr.get_npts()
+            slices.append(np.s_[start:end])
+            start = end
+        return slices
+    
+    def plot(self, fig=0, tr_start=0, tr_stop=None, pdfpage=None, lc_solution=None):
         ##TODO: Plot excluded points
         fig = pl.figure(fig, figsize=[15,10])
     
@@ -398,12 +370,13 @@ class MultiTransitLC(object):
         for i, tr in enumerate(self.transits[tr_start:tr_stop]):
             t_tt, f_tt = tr.get_transit(time=True, mask_transit=False)
 
-            mf = np.median(f_tt[tr.tmask])
-            df = 4*f_tt[tr.tmask].std()
-            tp = [t_tt[~tr.tmask][0], t_tt[~tr.tmask][-1], t_tt[~tr.tmask][-1], t_tt[~tr.tmask][0]]
+            tmask = tr.tmask[tr.badpx_mask]
+            mf = np.median(f_tt[tmask])
+            df = 4*f_tt[tmask].std()
+            tp = [t_tt[~tmask][0], t_tt[~tmask][-1], t_tt[~tmask][-1], t_tt[~tmask][0]]
 
-            upl[i].plot(t_tt[tr.tmask],f_tt[tr.tmask],'o', c='0.5', ms=2.5)
-            upl[i].plot(t_tt[~tr.tmask],f_tt[~tr.tmask],'o', c='0.0', ms=2.5)
+            upl[i].plot(t_tt[tmask],f_tt[tmask],'o', c='0.5', ms=2.5)
+            upl[i].plot(t_tt[~tmask],f_tt[~tmask],'o', c='0.0', ms=2.5)
             upl[i].fill(tp, [mf+df, mf+df, mf-df, mf-df], alpha=0.05)
             upl[i].plot([tr.t_center, tr.t_center], [mf-df, mf+df], c='0.5', ls='--', lw=1)
 
@@ -421,14 +394,31 @@ class MultiTransitLC(object):
             t_fn, f_fn = tr.get_transit(time=True, mask_transit=False, cleaned=True, normalize=True)
             dpl[i].plot(t_fn, f_fn, '-', c='0')
             dpl[i].plot(t_fn, f_fn, '.', c='0')
+
+            if lc_solution is None:
+                dpl[i].axhline(1+3*std, c='0', ls=':')
+                dpl[i].axhline(1-6*std, c='0', ls=':')
+
+            rtime, rflux = tr.get_rejected_points(normalize=True)
+            dpl[i].plot(rtime, rflux, 'x', c='0', ms=3)
+            for rt in rtime:
+                dpl[i].axvline(rt, ymin=0, ymax=0.025, c='0')
+                dpl[i].axvline(rt, ymin=0.975, ymax=1, c='0')
+
+            if lc_solution is not None:
+                t_lc = np.linspace(t_fn[0], t_fn[-1], 200)
+                f_lc = lc_solution(t_lc)
+                dpl[i].plot(t_lc, f_lc, c='b')
+                dpl[i].plot(t_lc, f_lc+3*std, ':',c='0.5')
+                dpl[i].plot(t_lc, f_lc-6*std, ':',c='0.5')
+
+
             dpl[i].set_xlim(t_fn[0], t_fn[-1])
-            dpl[i].axhline(1+3*std, c='0', ls=':')
-            dpl[i].axhline(1-6*std, c='0', ls=':')
 
-        ymargin = 0.01*(self.flux.max() - self.flux.min())
+        ymargin = 0.01*(self.flux_r_max - self.flux_r_min)
 
-        pl.setp(upl, ylim=(self.flux.min()-ymargin, self.flux.max()+ymargin))
-        pl.setp(dpl, ylim=((self.flux.min()-ymargin)/self.flux.mean(), (self.flux.max()+ymargin)/self.flux.mean()))
+        pl.setp(upl, ylim=(self.flux_r_min-ymargin, self.flux_r_max+ymargin))
+        pl.setp(dpl, ylim=((self.flux_r_min-ymargin)/self.flux_r_mean, (self.flux_r_max+ymargin)/self.flux_r_mean))
         pl.setp((upl[1:], dpl[1:]), yticks=[])
         pl.setp((upl, dpl), xticks=[])
 
