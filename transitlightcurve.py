@@ -9,21 +9,22 @@ from geometry import Geometry
 from transitparameterization import TransitParameterization
 
 class TransitLightcurve(object):
-    def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time', method='fortran', zeropoint=1., npol=500, n_threads=0):
+    def __init__(self, parm, model=None, orbit=None, ldpar=None, mode='time', method='fortran', eccentric=False, zeropoint=1., npol=500, n_threads=0):
         self.parm  = parm
         self.method = method
         self.mode  = mode
-        self.model = model if model is not None else Gimenez(method=method, mode=mode, zeropoint=zeropoint, n_threads=n_threads, npol=npol)
+        self.model = model if model is not None else Gimenez(method=method, mode=mode, zeropoint=zeropoint, n_threads=n_threads, npol=npol, eccentric=eccentric)
         self.orbit = orbit if orbit is not None else Geometry(mode=mode)
         self.ldpar = ldpar if ldpar is not None else []
         self.orbit.update(self.parm)
+        self.eccentric = eccentric
 
-    def __call__(self, time, p=None, ldp=None):
+    def __call__(self, time, p=None, ldp=None, **kwargs):
         if p is not None or ldp is not None: self.update(p, ldp)
         if self.method == 'python' or self.mode == 'phase':
             return self.model(self.orbit.projected_distance(time), self.orbit.k, self.ldpar)
         else:
-            return self.model(time, self.orbit.k, self.ldpar, self.orbit.t0, self.orbit.p, self.orbit.a, self.orbit.i)
+            return self.model(time, self.orbit.k, self.ldpar, self.orbit.t0, self.orbit.p, self.orbit.a, self.orbit.i, **kwargs)
         
     def update(self, p=None, ldpar=None):
         if p is not None:
@@ -37,10 +38,12 @@ class TransitLightcurve(object):
 class TestLightcurve(TransitLightcurve):
     def __init__(self, tc=1., p=4., k=0.1, a=10., b=0., noise=1e-3,  ldpar=None,
                  mode='time', method='fortran', time_lim=[0., 2.], resolution=1500,
-                 variability=None, snoise=None, npol=500):
+                 variability=None, snoise=None, npol=500, **kwargs):
+
+        self.eccentric = kwargs.get('eccentric', False)
 
         parm = TransitParameterization('physical', [k, tc, p, a, b])
-        super(TestLightcurve, self).__init__(parm, ldpar=ldpar, mode=mode, method=method, zeropoint=1., npol=npol)
+        super(TestLightcurve, self).__init__(parm, ldpar=ldpar, mode=mode, method=method, eccentric=self.eccentric, zeropoint=1., npol=npol)
         self.noise = noise
         self.resolution = resolution
         self.time_lim = time_lim
@@ -59,8 +62,9 @@ class TestLightcurve(TransitLightcurve):
             self.badpoints = badpoints = permutation(resolution)[0:int(snoise[0]*resolution)]
             self.snoise    = uniform(0.0, snoise[1], self.badpoints.size)
 
-    def __call__(self):
-        flux = super(TestLightcurve, self).__call__(self.time)
+    def __call__(self, **kwargs):
+            
+        flux = super(TestLightcurve, self).__call__(self.time, **kwargs)
 
         if self.noise is not None:
             flux += normal(0., self.noise, self.resolution)
