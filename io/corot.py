@@ -64,9 +64,9 @@ def import_as_MTLC(ctarget, width=0.2, twidth=None, maxpts=None, **kwargs):
             flux.append(dat_d.field( channel_fits_names[ch]+'flux')[mask].copy().astype(np.float64))
             fdev.append(dat_d.field( channel_fits_names[ch]+'fluxdev')[mask].copy().astype(np.float64))
 
-    #if remove_contamination:
-    #    for i in range(len(flux)):
-    #        flux[i] -= ctarget.contamination * np.median(flux[i])
+    expmask = fdev[-1] < 1e-7
+    date[expmask]  -= 16./(60.*60.*24.)
+    date[~expmask] += 234./(60.*60.*24.)
 
     twidth = twidth or ctarget.transit_width
     maxpts = maxpts or -1 
