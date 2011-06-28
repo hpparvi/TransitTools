@@ -1,17 +1,7 @@
-import sys
-import numpy as np
-
-from numpy import array, asarray, ones
-from types import MethodType
-
 from transitLightCurve.core import *
-from transitLightCurve.transitlightcurve import TransitLightcurve
-from transitLightCurve.utilities import bin, fold
-
+from transitfitter import Fitter
 from fitparameterization import MTFitParameterization
 from fitnessfunction import FitnessFunction
-from transitfitter import Fitter
-from mcmc import MCMC
 from ptmcmc import PTMCMC
 from gibbsmcmc import GibbsMCMC
 
@@ -20,6 +10,9 @@ class MultiTransitMCMC(Fitter):
 
         lcdata    = lcdata if isinstance(lcdata, list) else [lcdata]
         nchannels = len(lcdata)
+        method    = kwargs.get('mcmcmethod', 'Gibbs')
+
+        methods = {'Gibbs':GibbsMCMC, 'PT':PTMCMC}
 
         ## Generate the fitting parameterization
         ## =====================================
@@ -30,10 +23,7 @@ class MultiTransitMCMC(Fitter):
         ## Setup the minimization function
         ## ================================
         self.fitfun = FitnessFunction(self.p, lcdata, **kwargs)
- 
-        #self.fitter = PTMCMC(self.fitfun, parameter_defs, **mcmc_pars)
-        self.fitter = GibbsMCMC(self.fitfun, parameter_defs, **mcmc_pars)
-
+        self.fitter = methods[method(self.fitfun, parameter_defs, **mcmc_pars)]
 
     def __call__(self):
         return self.fitter()
