@@ -33,6 +33,7 @@ from transitLightCurve.transitparameterization import TransitParameterization
 from transitLightCurve.fitting.fitparameterization import MTFitParameter
 from transitLightCurve.fitting.mcmc import DrawGaussian
 from transitLightCurve.fitting.mcmcprior import UniformPrior, GaussianPrior, JeffreysPrior
+from transitLightCurve.fitting.fitparameterization import MTFitParameterization
 
 import transitLightCurve.io.corot as CoRoT
 from transitLightCurve.io.corot import CoRoT_targets, import_as_MTLC
@@ -54,6 +55,7 @@ def main():
     op.add_option('', '--load-lcdata', dest='load_lcdata', action='store_true', default=False)
     op.add_option('', '--save-lcdata', dest='save_lcdata', action='store_true', default=False)
     op.add_option('', '--plot-transits', dest='plot_transits', action='store_true', default=False)
+    op.add_option('', '--no-gui', dest='use_curses', action='store_false', default=True)
 
     opt, arg = op.parse_args()
 
@@ -103,29 +105,30 @@ def main():
     np.random.seed(0)
     INF = 1e8
 
+
     ##########################################################################################
     ##
-    ## READ IN COROT PLANET PARAMETERS
-    ## ===============================
-    ##
-
-    fpars = {}
-    for p, d in cp.items('Fitting parameters'):
-        d = d.split(',')
-        if p == 'tc':
-            fpars[p] = MTFitParameter(p, [ct.tc+float(d[0]),ct.tc+float(d[1])])
-        elif p == 'p':
-            fpars[p] = MTFitParameter(p, [ct.p+float(d[0]), ct.p+float(d[1])])
-        else:
-            dsc = d[2].strip() if d[2].strip() != '-' else None
-            uni = d[3].strip() if d[3].strip() != '-' else None
-            fpars[p] = MTFitParameter(p, [float(d[0]),float(d[1])], description=dsc, units=uni)
+    ## READ IN THE PARAMETERS
+    ## ======================
+    parameter_defs = {}
+    for p in cp.items('MCMC Parameters'):
+        parameter_defs[p[0]] = eval(p[1])
 
     clean_pars = {'top':3, 'bottom':10}
     w_period   = cp.getfloat('General','w_period')
     w_transit  = cp.getfloat('General','w_transit')
     phase_lim  = cp.getfloat('General','phase_lim')
 
+    mcmc_pars = {'n_steps':cp.getint('MCMC','nsteps'),
+                 'n_chains':cp.getint('MCMC','nchains'),
+                 'seed':cp.getint('MCMC','seed'),
+                 'thinning':cp.getint('MCMC','thinning'),
+                 'autotune_length':cp.getint('MCMC','autotune_length'),
+                 'autotune_interval':cp.getint('MCMC','autotune_interval'),
+                 'monitor_interval':cp.getint('MCMC','monitor_interval'),
+                 'autosave_interval':cp.getint('MCMC','autosave_interval'),
+                 'autosave_filename':cp.get('MCMC','autosave_filename'),
+                 'use_curses':opt.use_curses}
 
     ##########################################################################################
     ##
@@ -138,9 +141,8 @@ def main():
                               ps_period=CoRoT.orbit_period)
 
 
-    def fit_corot(ct, data, fitparameters, de_pars):
-        return fit_multitransit(data, fitparameters,
-                                ct.stellar_parameters,
+    def fit_corot(ct, data, parameterization, de_pars):
+        return fit_multitransit(data, parameterization,
                                 de_pars=de_pars,
                                 ds_pars=ds_pars,
                                 method=method,
@@ -170,16 +172,21 @@ def main():
     ## MINIMIZATION
     ## ============
     ##
+    parameterization = MTFitParameterization(parameter_defs,
+                                             len(data),
+                                             data[0].n_transits,
+                                             mode='o',
+                                             **fit_pars)
 
     ## Initial fit
     ## ===========
     if do_initial_fit:
-        mres = fit_corot(ct, data, fpars, de_init_pars)
+        mres = fit_corot(ct, data, parameterization, de_init_pars)
         if is_root:  mres.save(fn_initial)
         if with_mpi: mres = mpi_comm.bcast(mres)
     else:
         mres = load_MTFitResult(fn_initial)
-
+    exit()
     ## Clean the data using the initial fit
     ## ====================================
     if is_root:
@@ -196,7 +203,7 @@ def main():
     ## Final fit
     ## ==========
     if do_final_fit:
-        mres = fit_corot(ct, data, fpars, de_final_pars)
+        mres = fit_corot(ct, data, parameterization, de_final_pars)
         if is_root: mres.save(fn_final)
         if with_mpi: mres = mpi_comm.bcast(mres)
     else:
@@ -208,41 +215,9 @@ def main():
     ## ====
     ##
     if do_mcmc:
-        mcmc_pars = {'n_steps':cp.getint('MCMC','nsteps'),
-                     'n_chains':cp.getint('MCMC','nchains'),
-                     'seed':cp.getint('MCMC','seed'),
-                     'thinning':cp.getint('MCMC','thinning'),
-                     'autotune_length':cp.getint('MCMC','autotune_length'),
-                     'autotune_interval':cp.getint('MCMC','autotune_interval'),
-                     'monitor_interval':cp.getint('MCMC','monitor_interval'),
-                     'autosave_interval':cp.getint('MCMC','autosave_interval'),
-                     'autosave_filename':cp.get('MCMC','autosave_filename')}
-
-        initial_parameter_values = {'tc':mres.e[1], 'p':mres.e[2], 'ld':[0.568],
-                                    'b2':mres.e[4]**2, 'zp':1.0}
-
-        ## Define the MCMC parameters
-        ## --------------------------
-        parameter_defs = {}
-        for p, v in zip(mres.parameterization.fitted_parameter_names,
-                        mres.parameterization.p_cur):
-
-            pt = eval(cp.get('MCMC Parameters',p))
-
-            print p, pt
-
-            parameter_defs[p] = {'start_value':v,
-                                 'draw_function': DrawGaussian(pt['sigma']),
-                                 'prior': pt['prior']}
-  
-        parameter_defs['error scale'] = {'start_value':0.95,
-                                         'draw_function': DrawGaussian(0.01),
-                                         'prior': JeffreysPrior(0.05, 2.0)}
-
-        ## Run the MCMC simulation
-        ## -----------------------
-        mcmc = MultiTransitMCMC(data, fpars, ct.stellar_parameters, parameter_defs,
-                                initial_parameter_values, mcmc_pars, **fit_pars)
+        
+        parameterization = parameterization.mcmc_from_opt(mres.parameterization.fp_vect)
+        mcmc = MultiTransitMCMC(data, parameterization, mcmc_pars, **fit_pars)
         mcmcres = mcmc()
         mcmcres.save(cp.get('MCMC','file'))
 

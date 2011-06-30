@@ -62,6 +62,8 @@ class MTFitResult(FitResult):
         self.parameterization.get_b2 = None
         self.parameterization.get_ldc = None
         self.parameterization.get_zp = None
+        self.parameterization.get_contamination = None
+        self.parameterization.get_error_scale = None
         self.parameterization.get_kipping = None
         self.parameterization.map_p_to_k = None
         self.parameterization.map_k_to_p = None
@@ -93,7 +95,7 @@ def load_MTFitResult(filename):
     return res
 
     
-def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
+def fit_multitransit(lcdata, parameterization, **kwargs):
     """Fits a transit model to a lightcurve using both global and local optimization.
 
     First searches for a rough global minimum using the differential evolution method, and
@@ -124,10 +126,7 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
     nchannels = len(lcdata)
     totpoints = sum([d.npts for d in lcdata]) 
 
-    ## Generate the fitting parameterization
-    ## -------------------------------------
-    p = MTFitParameterization(bounds, stellar_prm, nchannels, lcdata[0].n_transits, **kwargs)
-    ##FIXME: Having different number of transits for each channel breaks things up.
+    p = parameterization
 
     if is_root:
         info('Fitting data with',I1)
@@ -215,8 +214,8 @@ def fit_multitransit(lcdata, bounds, stellar_prm, **kwargs):
 
 
         info('Best-fit fitting parameters',H2)
-        for idx, pn in enumerate(p.fitted_parameter_names):
-            info('%10s %14.5f'%(pn, p.fitted_parameters[idx]))
+        for idx, pn in enumerate(p.fp_names):
+            info('%10s %14.5f'%(pn, p.fp_vect[idx]))
 
         info('Fit statistics',H2)
         info('Differential evolution minimum %10.2f'%chi_de,I1)

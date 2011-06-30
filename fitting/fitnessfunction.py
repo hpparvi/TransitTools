@@ -42,6 +42,7 @@ class FitnessFunction(object):
         self.gl = parm.get_ldc
         self.gt = parm.get_ttv
         self.gb = parm.get_b2
+        self.gc = parm.get_contamination
 
         self.times  = [t.get_time()               for t in data]
         self.fluxes = [t.get_flux(normalize=True) for t in data]
@@ -117,8 +118,7 @@ class FitnessFunction(object):
         nch = len(self.data)
         c = []
         addl(c, "def fitfun(self, p_fit):")
-        addl(c, "  self.parm.update(p_fit)")
-        addl(c, "  if self.parm.is_inside_limits():")
+        addl(c, "  if self.parm.is_inside_limits(p_fit):")
 
         ecc_str = ', e=self.eccentricity, w=self.omega' if self.eccentric else ''
 
@@ -127,18 +127,18 @@ class FitnessFunction(object):
         if self.parm.separate_ld:
             for i in range(len(self.data)):
                 #if i>0: addl(c, "    if not np.all(asarray(self.gl({0})) > asarray(self.gl({1}))): return 1e18".format(i, i-1))
-                addl(c, "    ld{ch} = self.gl({ch})".format(ch=i))
+                addl(c, "    ld{ch} = self.gl(p_fit, {ch})".format(ch=i))
                 addl(c, "    if ld{ch}[0] < 0. or ld{ch}[0] > 1.: return 1e18".format(ch=i))
         else:
-            addl(c, "    ld = self.gl()")
+            addl(c, "    ld = self.gl(p_fit)")
             addl(c, "    if ld[0] < 0. or ld[0] > 1.: return 1e18")
 
         if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
-            addl(c, "    kp = self.gk(0)")
+            addl(c, "    kp = self.gk(p_fit, 0)")
             addl(c, "    chi = 0.")
             #addl(c, '    zp = array([self.gz(i_ch) for i_ch in range(self.nch)])')
             for ch in range(len(self.data)):
-                addl(c, '    model = self.gz({ch}) * self.lc(self.times[{ch}], kp, ld{ch}{ecc_str},contamination=self.contamination)'.format(ch=ch,ecc_str=ecc_str))
+                addl(c, '    model = self.gz(p_fit, {ch}) * self.lc(self.times[{ch}], kp, ld{ch}{ecc_str},contamination=self.gc(p_fit))'.format(ch=ch,ecc_str=ecc_str))
                 addl(c, '    chi += chi_sqr(self.fluxes[{ch}], model, self.ivars[{ch}])'.format(ch=ch))
                 #addl(c, '    print self.gk({ch}), self.gl({ch})'.format(ch=ch))
 
@@ -151,16 +151,16 @@ class FitnessFunction(object):
             #addl(c, "    if b2 < 0. or b2 > 1.: return 1e18\n")
 
             if self.parm.fit_ttv:
-                addl(c, "    p_ttv = self.gt(); ttv_a = p_ttv[0]; ttv_p = p_ttv[1]")
+                addl(c, "    p_ttv = self.gt(p_fit); ttv_a = p_ttv[0]; ttv_p = p_ttv[1]")
 
             if not self.parm.separate_k2_ch:
-                addl(c, '    kp=self.gk(); period=kp[2]')
+                addl(c, '    kp=self.gk(p_fit); period=kp[2]')
             else:
                 raise NotImplementedError
 
             addl(c,'')
             if self.parm.fit_ttv:
-                addl(c, '    zp = array([self.gz(i_ch) for i_ch in range(self.nch)])')
+                addl(c, '    zp = array([self.gz(p_fit, i_ch) for i_ch in range(self.nch)])')
                 addl(c, '    self.atmp[:] = calculate_time_with_ttv(ttv_a, ttv_p, period, self.atimes, self.atnumbs)')
                 if not self.parm.separate_ld:
                     addl(c, '    self.atmp[:] = self.lc(self.atmp, kp, ld)')

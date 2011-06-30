@@ -35,7 +35,7 @@ class GibbsMCMC(MCMC):
             self.i_chain = chain
             P_cur = self.p.copy()
             prior_cur = asarray([p.prior(P_cur[i]) for i, p in enumerate(self.parameters)])
-            X_cur = self.chifun(P_cur[:-1])
+            X_cur = self.chifun(P_cur)
 
             at_test = np.zeros(self.n_parms, dtype=np.int)
  
@@ -48,14 +48,17 @@ class GibbsMCMC(MCMC):
                     for i_p, p in enumerate(self.parameters):
                         P_try[i_p] = p.draw(P_cur[i_p])
                         prior_try[i_p] = p.prior(P_try[i_p])
-                        X_try =  self.chifun(P_try[:-1])
+                        X_try =  self.chifun(P_try)
 
                         prior_ratio = prior_try.prod() / prior_cur.prod()
-                        error_ratio = P_try[-1] / P_cur[-1]
+
+                        err_t = self.fitpar.get_error_scale(P_try)
+                        err_c = self.fitpar.get_error_scale(P_cur)
+                        error_ratio = err_t / err_c
 
                         self.result.accepted[chain, i_p, 0] += 1
 
-                        if X_try < 1e17 and self.acceptStep(P_cur[-1]*X_cur, P_try[-1]*X_try, prior_ratio, error_ratio):
+                        if X_try < 1e17 and self.acceptStep(err_c*X_cur, err_t*X_try, prior_ratio, error_ratio):
                             P_cur[i_p] = P_try[i_p]
                             prior_cur[i_p] = prior_try[i_p]
                             X_cur = X_try
@@ -70,7 +73,7 @@ class GibbsMCMC(MCMC):
                         for i_p, p in enumerate(self.parameters):
                             accept_ratio  = at_test[i_p]/25. 
                             accept_adjust = (1. - self.autotune_strength) + self.autotune_strength*4.* accept_ratio
-                            p._draw_method.sigma *= accept_adjust
+                            p.draw_function.sigma *= accept_adjust
                         at_test[:] = 0.
                         i_at = 0
                     i_at  += 1
@@ -168,7 +171,7 @@ class MCMCCursesUI(object):
         self.iw.addstr(2,15,"{0:6d}/{1:6d}".format(self.mcmc.i_step+1, self.mcmc.n_steps))
 
         self.aw.addstr(2,1,' '.join(['{0:^10.1%}'.format(a) for a in self.mcmc.result.get_acceptance()]))
-        self.sw.addstr(2,1,' '.join(['{0:^10.6f}'.format(s) for s in [p._draw_method.sigma for p in self.mcmc.parameters]]))
+        self.sw.addstr(2,1,' '.join(['{0:^10.6f}'.format(s) for s in [p.draw_function.sigma for p in self.mcmc.parameters]]))
 
 
 class GibbsMCMCResult(MCMCResult):

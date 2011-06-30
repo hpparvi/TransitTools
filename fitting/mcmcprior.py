@@ -1,4 +1,5 @@
 from math import exp, log, sqrt, pi
+from numpy.random import normal, uniform
 
 class Prior(object):
     def __init__(self, a, b):
@@ -6,6 +7,12 @@ class Prior(object):
         self.b = float(b)
         self.width = b - a
 
+    def limits(self): return self.a, self.b 
+
+    def min(self): return self.a
+
+    def max(self): return self.b
+    
 
 class UniformPrior(Prior):
     def __init__(self, a, b):
@@ -15,6 +22,8 @@ class UniformPrior(Prior):
     def __call__(self, x):
         return self._f if self.a < x < self.b else 0.
 
+    def random(self):
+        return uniform(self.a, self.b)
 
 class JeffreysPrior(Prior):
     def __init__(self, a, b):
@@ -23,7 +32,8 @@ class JeffreysPrior(Prior):
 
     def __call__(self, x):
         return 1. / (x*self._f) if self.a < x < self.b else 0.
-        
+
+    def random(self): raise NotImplementedError
 
 class GaussianPrior(Prior):
     def __init__(self, mean, std):
@@ -35,7 +45,10 @@ class GaussianPrior(Prior):
 
     def __call__(self, x):
         return self._f1 * exp(-(x-self.mean)**2 * self._f2) if self.a < x < self.b else 0.
-        
+
+    def random(self):
+        return normal(self.mean, self.std)
+    
 mcmcpriors = {'uniform':UniformPrior,
               'jeffreys':JeffreysPrior,
               'gaussian':GaussianPrior}

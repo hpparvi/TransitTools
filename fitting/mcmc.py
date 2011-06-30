@@ -52,7 +52,7 @@ class MCMC(object):
     """
     Class encapsulating the mcmc run.
     """
-    def __init__(self, chifun, parameter_defs, **kwargs):
+    def __init__(self, chifun, parameterization, **kwargs):
         
         self.seed     = kwargs.get('seed', 0)
         self.n_chains = kwargs.get('n_chains', 1)
@@ -90,28 +90,18 @@ class MCMC(object):
             self.fig_progress = pl.figure(10, figsize=(34,20))
 
         self.chifun = chifun
-        self.fitpar = self.chifun.parm
-        self.n_parms = self.fitpar.n_fitted_parameters + 1
+        self.parameters = parameterization.fp_defs
+        self.fitpar = parameterization
+        self.n_parms = self.fitpar.n_fp
 
         self.n_points = concatenate(self.chifun.times).size
 
-        self.parameters = []
-        self.p_names = concatenate([self.fitpar.get_parameter_names(), ['error scale']])
-        self.p_descr = concatenate([self.fitpar.get_parameter_descriptions(), ['Error scale']])
-
-        try:
-            for name, descr in zip(self.p_names, self.p_descr):
-                self.parameters.append(MCMCParameter(name, descr,
-                                                     parameter_defs[name]['start_value'],
-                                                     parameter_defs[name]['draw_function'],
-                                                     parameter_defs[name]['prior']))
-        except KeyError:
-            print "Error: no sigma given for parameter %s" %name
-            sys.exit()
-
-        self.p0 = asarray([p.start_value for p in self.parameters])
+        self.p0 = self.fitpar.fp_vect.copy()
         self.p  = self.p0.copy()
         
+        self.p_names = self.fitpar.fp_names
+        self.p_descr = [p.description for p in self.parameters if p.free == True]
+
         self.result = MCMCResult(self.n_chains_l, self.n_steps, self.n_parms, self.p_names, self.p_descr)
 
         acceptionTypes = {'ChiLikelihood':self._acceptStepChiLikelihood}
