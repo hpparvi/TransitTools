@@ -284,6 +284,7 @@ contains
     real(8), dimension(size(u)+1) :: n, Cn
     real(8), dimension(1) :: b
     real(8), dimension(size(z)) :: c
+    real(8), dimension(size(u)) :: uu ! Change to quadratic
     integer :: i, j 
 
     a  = 0._fd
@@ -291,14 +292,15 @@ contains
     n  = [(i, i=0,size(u))]
     b  = r/(1._fd+r)
     c  = z/(1._fd+r)
-    
-    do j=1,size(u)+1
-       call alpha(b, c, j-1, npol, a(:,j))
+    uu = [u(1)+2._fd*u(2), -u(2)]
+
+    do j=0,size(u)
+       call alpha(b, c, j, npol, a(:,j+1))
     end do
 
     if (size(u) > 0) then
-       Cn(1) = (1._fd - sum(u)) / (1._fd - sum(u*n(2:) / (n(2:)+2._fd)))
-       Cn(2:) = u / (1._fd - n(2:) * u / (n(2:)+2._fd))
+       Cn(1) = (1._fd - sum(uu)) / (1._fd - sum(uu*n(2:) / (n(2:)+2._fd)))
+       Cn(2:) = uu / (1._fd - sum(n(2:) * uu / (n(2:)+2._fd)))
     end if
 
     !$omp parallel do private(i), shared(z,gimenez_v, a, Cn) default(none)
