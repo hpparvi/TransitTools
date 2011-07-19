@@ -12,15 +12,32 @@
 """
 from __future__ import division
 import sys
-
-from optparse import OptionParser
 import cPickle
-import matplotlib as mpl
-#mpl.use('Agg')
-import matplotlib.pyplot as pl
 import numpy as np
-
 from time import time
+from optparse import OptionParser
+
+##########################################################################################
+##
+## OPTION PARSER
+## ==============
+op = OptionParser()
+op.add_option('-f', '--config-file', dest='config_file', type='str', default=None)
+op.add_option('', '--no-initial-fit', dest='do_initial_fit', action='store_false', default=True)
+op.add_option('', '--no-final-fit', dest='do_final_fit', action='store_false', default=True)
+op.add_option('', '--no-mcmc', dest='do_mcmc', action='store_false', default=True)
+op.add_option('', '--load-lcdata', dest='load_lcdata', action='store_true', default=False)
+op.add_option('', '--save-lcdata', dest='save_lcdata', action='store_true', default=False)
+op.add_option('', '--plot-transits', dest='plot_transits', action='store_true', default=False)
+op.add_option('', '--no-gui', dest='use_curses', action='store_false', default=True)
+op.add_option('', '--use-Agg', dest='use_agg', action='store_true', default=False)
+
+opt, arg = op.parse_args()
+
+import matplotlib as mpl
+if opt.use_agg:
+    mpl.use('Agg')
+import matplotlib.pyplot as pl
 from matplotlib.backends.backend_pdf import PdfPages
 
 from transitLightCurve.core import *
@@ -45,19 +62,6 @@ def main():
     ##
     ## CONFIG AND OPTION PARSERS
     ## =========================
-
-    op = OptionParser()
-
-    op.add_option('-f', '--config-file', dest='config_file', type='str', default=None)
-    op.add_option('', '--no-initial-fit', dest='do_initial_fit', action='store_false', default=True)
-    op.add_option('', '--no-final-fit', dest='do_final_fit', action='store_false', default=True)
-    op.add_option('', '--no-mcmc', dest='do_mcmc', action='store_false', default=True)
-    op.add_option('', '--load-lcdata', dest='load_lcdata', action='store_true', default=False)
-    op.add_option('', '--save-lcdata', dest='save_lcdata', action='store_true', default=False)
-    op.add_option('', '--plot-transits', dest='plot_transits', action='store_true', default=False)
-    op.add_option('', '--no-gui', dest='use_curses', action='store_false', default=True)
-
-    opt, arg = op.parse_args()
 
     cp.read(opt.config_file)
 
