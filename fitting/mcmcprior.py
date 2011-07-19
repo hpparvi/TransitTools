@@ -1,3 +1,5 @@
+from __future__ import division
+
 from math import exp, log, sqrt, pi
 from numpy.random import normal, uniform
 
@@ -49,6 +51,19 @@ class GaussianPrior(Prior):
     def random(self):
         return normal(self.mean, self.std)
     
+class InverseSqrtPrior(Prior):
+    def __init__(self, a, b):
+        if a < 0 or b < 0:
+            print 'Error: bad values for the InverseSqrtPrior.'
+            exit()
+
+        a = a if a >1e-8 else 1e-8
+        super(InverseSqrtPrior, self).__init__(a,b)
+        self._f = 1/(2*(sqrt(b)-sqrt(a)))
+
+    def __call__(self, x):
+        return 1/sqrt(x)
+
 mcmcpriors = {'uniform':UniformPrior,
               'jeffreys':JeffreysPrior,
               'gaussian':GaussianPrior}
