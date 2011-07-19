@@ -108,6 +108,19 @@ class MCMC(object):
         self.acceptStep = acceptionTypes['ChiLikelihood']
 
 
+    def log_likelihood_Gaussian(self, chi_sqr, sigma, sigma_scale, n):
+        return 0.5*(n*log(sigma_scale/(2*pi*sigma**2)) - sigma_scale*chi_sqr)
+
+    def log_likelihood_ratio_gaussian(self, X0, X1, p0, p1, b0, b1, n):
+        return 0.5*(n*log(b0/b1) + b0*X0 - b1*X1)
+    
+    def log_likelihood_Cauchy(self): pass
+    def log_likelihood_ratio_Cauchy(self): pass
+
+    def log_likelihood_Laplace(self): pass
+    def log_likelihood_ratio_Laplace(self): pass
+
+
     def _acceptStepChiLikelihood(self, X0, Xt, prior_ratio, error_ratio):
         """Decides whether we should accept the step or not based on the likelihood ratios.
 

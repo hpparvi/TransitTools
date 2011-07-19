@@ -77,6 +77,8 @@ class MTFitParameterization(object):
         self.separate_zp_tr = kwargs.get('separate_zp_per_transit',   False)
         self.separate_ld    = kwargs.get('separate_ld_per_channel',   False)
 
+        self.n_ldc = kwargs.get('n_ldc', 1)
+
         self.p_defs = []; self.p_indices = {}
 
         self.cp_names = [];  self.cp_priors = []
@@ -102,7 +104,6 @@ class MTFitParameterization(object):
         info('Fit TTVs: %s' %self.fit_ttv, I1)
 
         self.n_lds = nch if self.separate_ld else 1
-        self.n_ldc = 2 if 'v' in parameters.keys() else 1
         self.n_k2  = nch if self.separate_k2_ch else 1
         self.n_zp  = nch if not self.separate_zp_tr else nch*ntr
 
@@ -117,6 +118,8 @@ class MTFitParameterization(object):
                                               flags=flags,
                                               description = p[name].get('description', None),
                                               units = p[name].get('units',None)))
+            ppp = self.p_defs[-1]
+            print ppp.name, ppp.value
 
 
         ## --- Radius ratio ---
@@ -141,7 +144,7 @@ class MTFitParameterization(object):
         ## mass and radius to compute it. If we don't fit the inverse width, we need
         ## the mass and radius distributions.
         if self.fit_transit_width:
-            add_parameter(True, 'it')
+            add_parameter(p['it']['free'], 'it')
         else:
             add_parameter(False, 'Sm')
             add_parameter(False, 'Sr')
@@ -151,7 +154,7 @@ class MTFitParameterization(object):
         if self.n_ldc == 1:
             for i in range(self.nch):
                 add_parameter(self.fit_limb_darkening, 'u %i'%i)
-        else:
+        elif self.n_ldc == 2:
             for i in range(self.nch):
                 add_parameter(self.fit_limb_darkening, 'u %i + v %i'%(i,i))
                 add_parameter(self.fit_limb_darkening, 'u %i - v %i'%(i,i))
@@ -193,10 +196,11 @@ class MTFitParameterization(object):
         self.n_cp     = self.cp_names.size
         self.cp_vect  = zeros(self.n_cp)
 
-        self.p_cur = self.fp_vect
+        for i, name in enumerate(self.fp_names):
+            self.fp_vect[i] = self.p_defs[self.p_indices[name]].value
 
         self.parameter_string = {}
-
+        
         ## Get views
         ## =========
         for idx, name in enumerate(self.fp_names):
@@ -215,6 +219,7 @@ class MTFitParameterization(object):
         self._generate_b2_getter()
         self._generate_ld_getter()
         self._generate_zp_getter()
+        self._generate_p_getter()
         self._generate_kipping_getter()
         self._generate_contamination_getter()
         self._generate_error_scale_getter()
@@ -224,9 +229,7 @@ class MTFitParameterization(object):
         self.map_p_to_k = generate_mapping("physical","kipping")
         self.map_k_to_p = generate_mapping("kipping","physical")
 
-        self.p_cur[:] = vstack([self.p_min, self.p_max]).mean(0)
-
-        info('Parameter vector length: %i' %self.p_cur.size, I1)
+        info('Parameter vector length: %i' %self.fp_vect.size, I1)
         info('')
 
         
@@ -274,6 +277,24 @@ class MTFitParameterization(object):
         self.get_b2 = MethodType(get_b2, self, MTFitParameterization)
 
         
+    ## Period
+    ## ======
+    def _generate_p_str(self):
+        ps = self.parameter_string['p']
+        if self.fit_period:
+            return "{}[{}]".format(ps[0], ps[1])
+        else:
+            return self._generate_cp_str('p')
+        
+    def _generate_p_getter(self):
+        src  = "def get_p(self, p):\n"
+        src += "  return {}\n".format(self._generate_p_str())
+
+        exec(src)
+        self.get_p_src = src
+        self.get_p = MethodType(get_p, self, MTFitParameterization)
+
+        
     ## Limb Darkening
     ## ==============
     def _generate_ld_str(self):
@@ -295,8 +316,8 @@ class MTFitParameterization(object):
                 ps1 = self.parameter_string['u 0 + v 0']
                 ps2 = self.parameter_string['u 0 - v 0']
 
-                n1 = "{}[{}{}]".format(ps1[0], ps1[1], ld_str)
-                n2 = "{}[{}{}]".format(ps2[0], ps2[1], ld_str)
+                n1 = "{}[{}{}]".format(ps1[0], ps1[1], ch_str)
+                n2 = "{}[{}{}]".format(ps2[0], ps2[1], ch_str)
                 return "[0.5*({}+{}), 0.5*({}-{})]".format(n1, n2, n1, n2)
 
     def _generate_ld_getter(self):
@@ -329,6 +350,17 @@ class MTFitParameterization(object):
         self.get_zp = MethodType(get_zp, self, MTFitParameterization)
 
         
+    #FIXME: Inverse half-width should be handled differently.
+    def _generate_inverse_transit_halfwidth_str(self):
+       if self.fit_transit_width:
+           if self.p_defs[self.p_indices['it']].free:
+               return "%s[%i]\n" %self.parameter_string['it']
+           else:
+               return self._generate_cp_str('it')
+       else:
+           return "self.kipping_i(%s[%i], %s)\n"%(ps['p']+(self._generate_b2_str(),))
+
+
     ## Kipping parameterization
     ## ========================
     def _generate_kipping_getter(self):
@@ -340,11 +372,8 @@ class MTFitParameterization(object):
         src += "  p_out = _p_out or self.kp_tmp\n"
         src += "  p_out[0] = %s[%s]\n"%(k21, k22)
         src += "  p_out[1] = %s[%i]\n"%ps['tc']
-        src += "  p_out[2] = %s[%i]\n"%ps['p']
-        if self.fit_transit_width:
-            src += "  p_out[3] = %s[%i]\n" %ps['it']
-        else:
-            src += "  p_out[3] = self.kipping_i(%s[%i], %s)\n"%(ps['p']+(self._generate_b2_str(),))
+        src += "  p_out[2] = %s\n"%(self._generate_p_str())
+        src += "  p_out[3] = %s\n"%(self._generate_inverse_transit_halfwidth_str())
         src += "  p_out[4] = %s\n"%self._generate_b2_str()
         src += "  return p_out\n"
 
@@ -378,7 +407,7 @@ class MTFitParameterization(object):
             else:
                 src += "  return "+self._generate_cp_str('error scale')
         else:
-            src += "  return 0."
+            src += "  return 1."
 
         exec(src)
         self.get_error_scale_src = src

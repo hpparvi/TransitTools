@@ -84,8 +84,10 @@ class GibbsMCMC(MCMC):
                 ## MONITORING
                 ## ==========
                 if self.monitor and (i_s+1)%self.minterval == 0:
-                    self.plot_simulation_progress(i_s, chain)
-
+                    try:
+                        self.plot_simulation_progress(i_s, chain)
+                    except RuntimeError: pass
+                        
                 if (i_s+1)%self.sinterval == 0:
                     self.result.save(self.sname)
 

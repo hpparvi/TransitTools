@@ -84,11 +84,7 @@ class FitnessFunction(object):
                                     eccentric=self.eccentric)
 
         self.fitfun_code = ""
-
-        if kwargs.get('unroll_loops', True):
-            self.generate_fitfun_unroll()
-        else:
-            self.generate_fitfun()
+        self.generate_fitfun()
  
 
     def basic_model(self, time, ch, tr):
@@ -111,40 +107,39 @@ class FitnessFunction(object):
         return self.gz(ch,0) * self.lc(time + ttv, pk, ldc) 
 
 
-    def generate_fitfun_unroll(self):
+    def generate_fitfun(self):
         """Generates a fitness function based on given fit parameterization.
         Note: As anyone can see, this is a bit of a mess at the moment. Needs a serious cleanup!
         """
         nch = len(self.data)
+        channels = range(nch)
         c = []
         addl(c, "def fitfun(self, p_fit):")
         addl(c, "  if self.parm.is_inside_limits(p_fit):")
-
         ecc_str = ', e=self.eccentricity, w=self.omega' if self.eccentric else ''
 
         ## Limb-darkening
         ## ==============
         if self.parm.separate_ld:
-            for i in range(len(self.data)):
-                #if i>0: addl(c, "    if not np.all(asarray(self.gl({0})) > asarray(self.gl({1}))): return 1e18".format(i, i-1))
-                addl(c, "    ld{ch} = self.gl(p_fit, {ch})".format(ch=i))
-                addl(c, "    if ld{ch}[0] < 0. or ld{ch}[0] > 1.: return 1e18".format(ch=i))
+            for ch in channels:
+                addl(c, "    ld{ch} = self.gl(p_fit, {ch})".format(ch=ch))
+                addl(c, "    if ld{ch}[0] < 0. or ld{ch}[0] > 1.: return 1e18".format(ch=ch))
         else:
             addl(c, "    ld = self.gl(p_fit)")
             addl(c, "    if ld[0] < 0. or ld[0] > 1.: return 1e18")
 
         if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
-            addl(c, "    kp = self.gk(p_fit, 0)")
+            addl(c, "    kp = self.gk(p_fit)")
             addl(c, "    chi = 0.")
             #addl(c, '    zp = array([self.gz(i_ch) for i_ch in range(self.nch)])')
-            for ch in range(len(self.data)):
-                addl(c, '    model = self.gz(p_fit, {ch}) * self.lc(self.times[{ch}], kp, ld{ch}{ecc_str},contamination=self.gc(p_fit))'.format(ch=ch,ecc_str=ecc_str))
+            for ch in channels:
+                addl(c, '    model = self.gz(p_fit, {ch}) * self.lc(self.times[{ch}], kp, ld{ch}{ecc_str}, contamination=self.gc(p_fit))'.format(ch=ch,ecc_str=ecc_str))
                 addl(c, '    chi += chi_sqr(self.fluxes[{ch}], model, self.ivars[{ch}])'.format(ch=ch))
-                #addl(c, '    print self.gk({ch}), self.gl({ch})'.format(ch=ch))
 
                 #addl(c, '    self.atmp[{ls}:{le}] = self.lc(self.times, self.gk({ch}), self.gl({ch}))'.format(ch=ch, ls=0 if ch==0 else self.lengths[:ch].sum(), le=-1 if ch==len(self.data) else self.lengths[:ch+1].sum()))
                 #addl(c, '    self.atmp[:] = apply_zeropoints(zp, self.lengths, self.atmp)')
                 #addl(c, '    chi = chi_sqr(self.afluxes, self.atmp, self.aivars)')
+            #addl(c, "    import pylab as pl; pl.plot(self.times[1], model); pl.show(); exit()")    
             addl(c, "    return chi")
         else:
             #addl(c, "    b2 = self.gb()")
@@ -183,42 +178,6 @@ class FitnessFunction(object):
         exec(code)
         self.fitfun_src = code
         self.fitfun = MethodType(fitfun, self, FitnessFunction)
-
-    def generate_fitfun(self):
-        """Generates a fitness function based on given fit parameterization.
-
-        """
-        c = []
-        addl(c, "def fitfun(self, p_fit):")
-        addl(c, "  self.parm.update(p_fit)")
-        addl(c, "  if self.parm.is_inside_limits():")
-        addl(c, "    chi = 0.")
-        if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
-            addl(c, "    for ch, (time,flux,ivar) in enumerate(zip(self.times,self.fluxes,self.ivars)):")
-            addl(c, "        if ch > 0 and not np.all(asarray(self.gl(ch)) > asarray(self.gl(ch-1))): return 1e18\n")
-            addl(c, "        chi += ((flux - self.basic_model(time, ch, 0))**2 * ivar).sum()")
-            addl(c, "    return chi")
-        else:
-            if self.parm.fit_ttv:
-                addl(c, "    p_ttv = self.gt()")
-            addl(c, "    for ch, (time,flux,ivar,sls) in enumerate(zip(self.times,self.fluxes,self.ivars,self.slices)):")
-            addl(c, "        if ch > 0 and not np.all(asarray(self.gl(ch)) > asarray(self.gl(ch-1))): return 1e18\n")
-            addl(c, "        for tr, sl in enumerate(sls):")
-            if self.parm.fit_ttv:
-                addl(c, "            chi += ((flux[sl] - self.ttv_model(time[sl], ch, tr, p_ttv))**2 * ivar[sl]).sum()")
-            else:
-                addl(c, "            chi += ((flux[sl] - self.basic_model(time[sl], ch, tr))**2 * ivar[sl]).sum()")
-            addl(c, "    return chi")
-        addl(c, "  else:")
-        addl(c, "    return 1e18")
-
-        code = ""
-        for line in c: code += line
-
-        self.fitfun_code = code
-        exec(code)
-        self.fitfun = MethodType(fitfun, self, FitnessFunction)
-
 
     def __call__(self, p_fit):
         return self.fitfun(p_fit)

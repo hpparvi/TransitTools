@@ -186,7 +186,7 @@ def main():
         if with_mpi: mres = mpi_comm.bcast(mres)
     else:
         mres = load_MTFitResult(fn_initial)
-    exit()
+
     ## Clean the data using the initial fit
     ## ====================================
     if is_root:
@@ -216,7 +216,7 @@ def main():
     ##
     if do_mcmc:
         
-        parameterization = parameterization.mcmc_from_opt(mres.parameterization.fp_vect)
+        parameterization = parameterization.mcmc_from_opt(mres.pv)
         mcmc = MultiTransitMCMC(data, parameterization, mcmc_pars, **fit_pars)
         mcmcres = mcmc()
         mcmcres.save(cp.get('MCMC','file'))
@@ -268,14 +268,16 @@ def main():
         for sl, tn in zip(slices[i], [t.number for t in ch.transits]):
             tnumbs[i][sl] = tn
 
-    ttv_a    = mres.parameterization.parameter_view['ttv a']
-    ttv_p    = mres.parameterization.parameter_view['ttv p']
+    ttv_a    = mres.parameterization.parameter_view.get('ttv a', None)
+    ttv_p    = mres.parameterization.parameter_view.get('ttv p', None)
 
     tp = TransitParameterization('physical', mres.ephemeris)
 
-    p  = [fold(d.get_time(), tp.pv[2], origo=tp.pv[1], shift=0.5)-0.5 for d in data]
-    p  = [fold(d.get_time() + ttv_a*np.sin(TWO_PI*ttv_p * tp.pv[2]*tnumbs[i]), tp.pv[2], origo=tp.pv[1],
-               shift=0.5)-0.5 for i,d in enumerate(data)]
+    if ttv_a is None:
+        p  = [fold(d.get_time(), tp.pv[2], origo=tp.pv[1], shift=0.5)-0.5 for d in data]
+    else:
+        p  = [fold(d.get_time() + ttv_a*np.sin(TWO_PI*ttv_p * tp.pv[2]*tnumbs[i]), tp.pv[2], origo=tp.pv[1],
+                   shift=0.5)-0.5 for i,d in enumerate(data)]
 
     pm = [np.abs(tmp)<phase_lim for tmp in p]
     f  = [d.get_flux() for d in data]

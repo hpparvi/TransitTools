@@ -42,9 +42,10 @@ class MTFitResult(FitResult):
         self.n_channels = fit_prm.nch
         self.channel_names = None
         self.ephemeris  = prm_ds.pv
-        self.limb_darkening = [[fit_prm.get_ldc(i, res_ds)] for i in range(fit_prm.nch)]
-        self.zeropoint = [[fit_prm.get_zp(i, res_ds)] for i in range(fit_prm.nch)]
-
+        self.limb_darkening = [[fit_prm.get_ldc(res_ds, i)] for i in range(fit_prm.nch)]
+        self.zeropoint = [[fit_prm.get_zp(res_ds, i)] for i in range(fit_prm.nch)]
+        self.pv = res_ds
+        
         self.chi_sqr = None
         self.de_population = None
         self.de_fitness    = None
@@ -62,6 +63,7 @@ class MTFitResult(FitResult):
         self.parameterization.get_b2 = None
         self.parameterization.get_ldc = None
         self.parameterization.get_zp = None
+        self.parameterization.get_p = None
         self.parameterization.get_contamination = None
         self.parameterization.get_error_scale = None
         self.parameterization.get_kipping = None
@@ -130,10 +132,10 @@ def fit_multitransit(lcdata, parameterization, **kwargs):
 
     if is_root:
         info('Fitting data with',I1)
-        info('%6i free parameters'%p.p_cur.size, I2)
+        info('%6i free parameters'%p.fp_vect.size, I2)
         info('%6i channels'%nchannels, I2)
         info('%6i datapoints'%totpoints, I2)
-        info('%6i levels of freedom'%(totpoints-p.p_cur.size), I2)
+        info('%6i levels of freedom'%(totpoints-p.fp_vect.size), I2)
         info('')
 
     ## Setup the minimization function
@@ -167,8 +169,8 @@ def fit_multitransit(lcdata, parameterization, **kwargs):
 
     ## Map the fits represented in Kipping parameterization to physical parameterization
     ## =================================================================================
-    p_de   = TransitParameterization('physical', p.get_physical(0, f_de))
-    p_fn   = TransitParameterization('physical', p.get_physical(0, f_fn))
+    p_de   = TransitParameterization('physical', p.get_physical(f_de))
+    p_fn   = TransitParameterization('physical', p.get_physical(f_fn))
 
     #######################################################################################
     ##
@@ -183,8 +185,8 @@ def fit_multitransit(lcdata, parameterization, **kwargs):
         nc = nchannels if p.separate_k2_ch else 1 
         nt = lcdata[0].n_transits if p.separate_zp_tr else 1
         for chn in range(nc):
-            info("%14.5f %14.5f  -  radius ratio"%(p.get_physical(chn, f_de)[0],
-                                                   p.get_physical(chn, f_fn)[0]), I1)
+            info("%14.5f %14.5f  -  radius ratio"%(p.get_physical(f_de, chn)[0],
+                                                   p.get_physical(f_fn, chn)[0]), I1)
 
         for i,k in enumerate(parameterizations['physical'][1:]):
             info("%14.5f %14.5f  -  %s" %(p_de[i+1], p_fn[i+1], parameters[k].description), I1)
@@ -192,21 +194,21 @@ def fit_multitransit(lcdata, parameterization, **kwargs):
         info("")
         for chn in range(nchannels):
             for tr in range(nt):
-                info("%14.5f %14.5f  -  zeropoint ch %i"%(p.get_zp(chn, tr, f_de),
-                                                          p.get_zp(chn, tr, f_fn), chn), I1)
+                info("%14.5f %14.5f  -  zeropoint ch %i"%(p.get_zp(f_de, chn, tr),
+                                                          p.get_zp(f_fn, chn, tr), chn), I1)
 
         info("")
         nc = nchannels if p.separate_ld else 1 
         for chn in range(nc):
-            ldc_de  = p.get_ldc(chn, f_de)
-            ldc_fn  = p.get_ldc(chn, f_fn)
+            ldc_de  = p.get_ldc(f_de, chn)
+            ldc_fn  = p.get_ldc(f_fn, chn)
             if p.n_ldc == 1:
                 info("%14.5f %14.5f  -  limb darkening ch %i u"%(ldc_de[0], ldc_fn[0], chn), I1)
             if p.n_ldc == 2:
                 info(" % 5.3f % 5.3f  % 5.3f % 5.3f  -  limb darkening ch %i u v"%(ldc_de[0], ldc_de[1], ldc_fn[0], ldc_fn[1], chn), I1)
 
         if p.fit_ttv:
-            p_ttv_de = p.get_ttv(f_fn)
+            p_ttv_de = p.get_ttv(f_de)
             p_ttv_fn = p.get_ttv(f_fn)
 
             info("%14.5f %14.5f  -  TTV amplitude [min]"%(p_ttv_de[0]*1440, p_ttv_fn[0]*1440), I1)
@@ -221,7 +223,7 @@ def fit_multitransit(lcdata, parameterization, **kwargs):
         info('Differential evolution minimum %10.2f'%chi_de,I1)
         info('Downhill simplex minimum       %10.2f'%chi_fn,I1)
         info('')
-        info("Akaike's information criterion %10.2f" %(chi_fn + 2*p.p_cur.size), I1)
+        info("Akaike's information criterion %10.2f" %(chi_fn + 2*p.fp_vect.size), I1)
         info('')
 
     if is_root:
