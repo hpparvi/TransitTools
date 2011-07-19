@@ -49,7 +49,7 @@ from transitLightCurve.transitparameterization import TransitParameterization
 
 from transitLightCurve.fitting.fitparameterization import MTFitParameter
 from transitLightCurve.fitting.mcmc import DrawGaussian
-from transitLightCurve.fitting.mcmcprior import UniformPrior, GaussianPrior, JeffreysPrior
+from transitLightCurve.fitting.mcmcprior import UniformPrior, GaussianPrior, JeffreysPrior, InverseSqrtPrior
 from transitLightCurve.fitting.fitparameterization import MTFitParameterization
 
 import transitLightCurve.io.corot as CoRoT

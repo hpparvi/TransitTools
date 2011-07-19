@@ -57,12 +57,12 @@ class InverseSqrtPrior(Prior):
             print 'Error: bad values for the InverseSqrtPrior.'
             exit()
 
-        a = a if a >1e-8 else 1e-8
+        a = a if a > 1e-8 else 1e-8
         super(InverseSqrtPrior, self).__init__(a,b)
         self._f = 1/(2*(sqrt(b)-sqrt(a)))
 
     def __call__(self, x):
-        return 1/sqrt(x)
+        return 1/sqrt(x) if self.a < x < self.b else 0.
 
 mcmcpriors = {'uniform':UniformPrior,
               'jeffreys':JeffreysPrior,
