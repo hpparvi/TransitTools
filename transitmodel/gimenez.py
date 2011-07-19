@@ -40,7 +40,6 @@ class Gimenez(TransitModel):
                 if self.mode == 'time':
                     self.shape = gimenez_f.gimenez.eval_t_e_d
                     self.type = 'fte'
-
             
     def __call__(self, z, r, u=[], t0=0, p=0, a=0, i=0, **kwargs):
         contamination = kwargs.get('contamination', 0.0)

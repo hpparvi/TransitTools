@@ -9,6 +9,7 @@ CMP = --f90exec=/usr/bin/mpif90
 
 all: transitmodel/gimenez.f90 Fortran/utilities.f90 fitting/fitnessfunction.f90
 	f2py -c --opt=${OPTS} ${CMP} -L${ACML_PATH} ${LIBS} -m gimenez_f transitmodel/gimenez.f90 ${FLAGS}
+	f2py -c --opt=${OPTS} ${CMP} -L${ACML_PATH} ${LIBS} -m gimenez_o transitmodel/gimenez_original.f90 ${FLAGS}
 	f2py -c --opt=${OPTS} ${CMP} -L${ACML_PATH} ${LIBS} -m fitnessfunction_f fitting/fitnessfunction.f90 ${FLAGS}
 	f2py -c --opt=${OPTS} ${CMP} -L${ACML_PATH} ${LIBS} -m utilities_f Fortran/utilities.f90 ${FLAGS}
 
@@ -17,8 +18,10 @@ all: transitmodel/gimenez.f90 Fortran/utilities.f90 fitting/fitnessfunction.f90
 
 openmp: transitmodel/gimenez.f90 Fortran/utilities.f90 fitting/fitnessfunction.f90
 	f2py -c --opt=${OPTS_OMP} ${CMP} -L${ACML_PATH} ${LIBS} -lgomp -m gimenez_f transitmodel/gimenez.f90 ${FLAGS}
+	f2py -c --opt=${OPTS_OMP} ${CMP} -L${ACML_PATH} ${LIBS} -lgomp -m gimenez_o transitmodel/gimenez_original.f90 transitmodel/gimenez_poly.f90 ${FLAGS}
 	f2py -c --opt=${OPTS_OMP} ${CMP} -L${ACML_PATH} ${LIBS} -lgomp -m fitnessfunction_f fitting/fitnessfunction.f90 ${FLAGS}
 	f2py -c --opt=${OPTS_OMP} ${CMP} -L${ACML_PATH} ${LIBS} -lgomp -m utilities_f Fortran/utilities.f90 ${FLAGS}
 
 	mv gimenez_f.so transitmodel/
+	mv gimenez_o.so transitmodel/
 	mv fitnessfunction_f.so fitting/
