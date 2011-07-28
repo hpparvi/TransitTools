@@ -21,7 +21,7 @@ class UniformPrior(Prior):
         super(UniformPrior, self).__init__(a,b)
         self._f = 1. / self.width
 
-    def __call__(self, x):
+    def __call__(self, x, pv=None):
         return self._f if self.a < x < self.b else 0.
 
     def random(self):
@@ -32,7 +32,7 @@ class JeffreysPrior(Prior):
         super(JeffreysPrior, self).__init__(a,b)
         self._f = log(b/a)
 
-    def __call__(self, x):
+    def __call__(self, x, pv=None):
         return 1. / (x*self._f) if self.a < x < self.b else 0.
 
     def random(self): raise NotImplementedError
@@ -45,7 +45,7 @@ class GaussianPrior(Prior):
         self._f1 = 1./ sqrt(2.*pi*std*std)
         self._f2 = 1./ (2.*std*std)
 
-    def __call__(self, x):
+    def __call__(self, x, pv=None):
         return self._f1 * exp(-(x-self.mean)**2 * self._f2) if self.a < x < self.b else 0.
 
     def random(self):
@@ -61,8 +61,36 @@ class InverseSqrtPrior(Prior):
         super(InverseSqrtPrior, self).__init__(a,b)
         self._f = 1/(2*(sqrt(b)-sqrt(a)))
 
-    def __call__(self, x):
+    def __call__(self, x, pv=None):
         return 1/sqrt(x) if self.a < x < self.b else 0.
+
+
+class B2Prior(Prior):
+    def __init__(self, a, b):
+        if a < 0 or b < 0:
+            print 'Error: bad values for the B2SqrtPrior.'
+            exit()
+
+        super(B2Prior, self).__init__(a,b)
+        self._f = b**2
+
+    def __call__(self, x, pv=None):
+        return 1/(2*x)
+
+
+
+class LinCombPrior(Prior):
+    def __init__(self, P1, P2, idx1, idx2):
+        super(LinCombPrior, self).__init__(-1, 1) # This is a quick hack, fix!
+        self.p1, self.i1 = P1, idx1
+        self.p2, self.i2 = P2, idx2
+        
+    def __call__(self, x, pv):
+        x1 = 0.5*(pv[self.i1]+pv[self.i2])
+        x2 = 0.5*(pv[self.i1]-pv[self.i2])
+
+        return self.p1(x1) * self.p2(x2)
+
 
 mcmcpriors = {'uniform':UniformPrior,
               'jeffreys':JeffreysPrior,
