@@ -224,6 +224,45 @@ class MCMCResult(FitResult):
     def get_acceptance(self):
         raise NotImplementedError
 
+    def get_samples(self, burn, thinning, name=None):
+        raise NotImplementedError
+
+    def get_map(self, name, burn, thinning, method='fit'):
+        from scipy.stats.mstats import mquantiles
+        d = name if isinstance(name, np.ndarray) else self.get_samples(burn, thinning, name)
+        method = method.lower()
+
+        if method.lower() == 'fit':
+             map, ep, em = fit_distribution(d)
+        elif method.lower() == 'fit2':
+            map, ep, em, map2, ep2, em2, x = fit_distribution2(d)
+            tt = np.linspace(d.min(), d.max(), 500)
+            ft = ((1-x)*asymmetric_gaussian(tt, map, ep, em)
+                  + x*asymmetric_gaussian(tt, map2, ep2, em2))
+            map = tt[ft.argmax()]
+            em  = mquantiles(d[d<map],[1-2*0.341])[0]
+            ep  = mquantiles(d[d>map],[2*0.341])[0]
+        elif method.lower() == 'median':
+            map, ep, em = mquantiles(d, [0.5, 0.5-0.341, 0.5+0.341])
+        elif method == 'histogram':
+            nb, vl = np.histogram(data, res)
+            mid    = np.argmax(nb)
+            map    = 0.5*(vl[mid]+vl[mid+1])
+            em  = mquantiles(d[d<map],[1-2*0.341])[0]
+            ep  = mquantiles(d[d>map],[2*0.341])[0]
+
+        return map, ep, em
+
+
+    #TODO: Replace with get_max_likelihood
+    def get_chi_minimum(self):
+        raise NotImplementedError
+
+    def get_quantiles(self, burn, thinning, quantiles=[0.5-0.341, 0.5, 0.5+0.341]):
+        from scipy.stats.mstats import mquantiles
+        data = self.get_samples(burn, thinning)
+        return {p: mquantiles(d, quantiles) for p, d in data.items()}
+
     def save(self, filename):
         f = open(filename, 'wb')
         dump(self, f)
@@ -235,8 +274,178 @@ class MCMCResult(FitResult):
     def plot(self, i_c, burn_in, thinning, fign=100, s_max=-1, c='b', alpha=1.0):
         raise NotImplementedError
 
+    def plot_parameter_distribution(self, name, burn, thinning, ax=None, **kwargs):
+        """
+        
+        Parameters
+        ==========
+          name
+          burn
+          thinning
+          ax
+
+        Keyword arguments
+        =================
+          nbins
+          fc
+          xlim
+          range
+          title
+          transformation
+          median
+          confidence_limits
+          fit_distribution
+          fit_n
+          xlabel
+          data
+        """
+        from scipy.stats.mstats import mquantiles
+
+        nbins = kwargs.get('nbins', 50)
+        fc    = kwargs.get('fc', '0.65')
+        xlim  = kwargs.get('xlim', None)
+        rnge  = kwargs.get('range', None)
+        xlabel = kwargs.get('xlabel', None)
+
+        if isinstance(name,str):
+            d = self.get_samples(burn, thinning, name)
+        elif isinstance(name, np.ndarray):
+            d = name
+        else:
+            raise NotImplementedError
+
+        transformation = kwargs.get('transformation', None)
+        if transformation is not None:
+        #    d = eval("{}()")
+            if transformation == 'sqrt':
+                d = np.sqrt(d)
+            elif transformation == 'square':
+                d = d**2
+
+        ax = ax or pl.axes()
+        xlim = xlim or mquantiles(d, [0.001, 0.999])
+        rnge = rnge or mquantiles(d, [0.001, 0.999])
+
+        if xlabel is None:
+            try:
+                xlabel = self.p_description[list(self.p_names).index(name)]
+                if  transformation == 'sqrt':
+                    xlabel = xlabel.lower().replace('squared','').strip().capitalize()
+            except ValueError:
+                xlabel = ''
+
+        ax.hist(d, nbins, range=rnge, fc=fc, histtype='stepfilled', normed=True, lw=1)
+
+        if kwargs.get('median', False):
+            ax.axvline(np.median(d), c='0.25', lw=1.5)
+        
+        if kwargs.get('confidence_limits', False):
+            qnt = mquantiles(d, [0.5-0.341, 0.5+0.341])
+            ax.axvline(qnt[0], ls='--', c='0.5', lw=1.5)
+            ax.axvline(qnt[1], ls='--', c='0.5', lw=1.5)
+            ax.fill_between(qnt,0,1e8, facecolor='0.9', edgecolor='1.0')
+
+        if kwargs.get('fit_distribution', False):
+            tt = np.linspace(d.min(), d.max(), 500)
+            if kwargs.get('fit_n', 1) == 1:
+                map, ep, em = fit_distribution(d)
+                ax.plot(tt, asymmetric_gaussian(tt, map, ep, em), c='0.0', lw=2)
+            else:
+                map, ep, em, map2, ep2, em2, x = fit_distribution2(d)
+                ft = ((1-x)*asymmetric_gaussian(tt, map, ep, em)
+                      + x*asymmetric_gaussian(tt, map2, ep2, em2))
+                #ax.plot(tt, asymmetric_gaussian(tt, map, ep, em), c='0.25', ls='--', lw=1)
+                #ax.plot(tt, asymmetric_gaussian(tt, map2, ep2, em2), c='0.25', ls='--', lw=1)
+                ax.plot(tt, ft, c='0.0', lw=2)
+
+                map = tt[ft.argmax()]
+                em  = mquantiles(d[d<map],[1-2*0.341])[0]
+                ep  = mquantiles(d[d>map],[2*0.341])[0]
+
+            ax.axvline(map, c='0.25', lw=2.)
+            ax.axvline(ep, ls='--', c='0.5', lw=1.5)
+            ax.axvline(em, ls='--', c='0.5', lw=1.5)
+            ax.fill_between([em,ep],0,1e8, facecolor='0.9', edgecolor='1.0')
+
+        ax.set_xlabel(xlabel)
+        ax.set_title(kwargs.get('title', ''))
+        ax.set_xlim(xlim)
+        ax.set_yticks([])
+
+
+    def plot_2d_distribution(self, names, burn, thinning, ax=None, **kwargs):
+        from scipy.stats.mstats import mquantiles
+        from numpy import sqrt, log
+        transformations = kwargs.get('transformations', [None,None])
+        gridsize = kwargs.get('gridsize',50)
+        extent = kwargs.get('extent', None)
+        xlim = kwargs.get('xlim', None)
+        ylim = kwargs.get('ylim', None)
+        xlabel = kwargs.get('xlabel', '')
+        ylabel = kwargs.get('ylabel', '')
+
+        ax = ax or pl.axes()
+        d = [self.get_samples(burn, thinning, names[0]),
+             self.get_samples(burn, thinning, names[1])]
+
+        for i, t in enumerate(transformations):
+            if t is not None: d[i] = eval(transformations[i].format('d[%i]'%i))
+
+        xlim = xlim or mquantiles(d[0], [0.001, 0.999])
+        ylim = ylim or mquantiles(d[1], [0.001, 0.999])
+
+        if extent is None:
+            extent = [xlim[0],xlim[1],ylim[0],ylim[1]]
+
+        ax.hexbin(d[0],d[1], gridsize=gridsize, extent=extent)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        pl.setp(ax, xlabel=xlabel or names[0], ylabel=ylabel or names[1])
+
 def load_MCMCResult(filename):
     f = open(filename, 'rb')
     res = load(f)
     f.close()
+    return res
+
+
+## Distribution fitting
+## ====================
+def asymmetric_gaussian(x, center, sp, sm):
+    from scipy.stats import norm
+    t = np.zeros_like(x)
+    Np = sqrt(2*pi*(sp-center)**2)/(sqrt(0.5*pi)*(sp-sm))
+    Nm = sqrt(2*pi*(center-sm)**2)/(sqrt(0.5*pi)*(sp-sm))
+    t[x>center]  = Np*norm.pdf(x[x>center], center, sp-center)
+    t[x<=center] = Nm*norm.pdf(x[x<=center], center, center-sm)
+    return t
+
+
+def fit_distribution(data):
+    from scipy.optimize import fmin
+    from scipy.stats.mstats import mquantiles
+
+    x = mquantiles(data, [0.5, 0.5+0.341, 0.5-0.341])
+    bv, be = np.histogram(data, 150, normed=True)
+    bc = 0.5*(be[:-1]+be[1:])
+    def fitness(x):
+        return ((bv - asymmetric_gaussian(bc, *x[:3]))**2).sum()
+
+    res = fmin(fitness, x, xtol=1e-8, disp=False)
+    return res
+
+def fit_distribution2(data):
+    from scipy.optimize import fmin
+    from scipy.stats.mstats import mquantiles
+
+    x = mquantiles(data, [0.45, 0.45+0.341, 0.45-0.341, 0.55, 0.55+0.341, 0.55-0.341, 0.5])
+    bv, be = np.histogram(data, 150, normed=True)
+    bc = 0.5*(be[:-1]+be[1:])
+    x[6] = 0.5
+    
+    def fitness(x):
+        return ((bv - (1-x[6])*asymmetric_gaussian(bc, *x[:3])
+                 - x[6]*asymmetric_gaussian(bc, *x[3:6]))**2).sum()
+
+    res = fmin(fitness, x, xtol=1e-8, maxiter=1000, disp=False)
     return res

@@ -34,7 +34,7 @@ class GibbsMCMC(MCMC):
         for chain in xrange(self.n_chains):
             self.i_chain = chain
             P_cur = self.p.copy()
-            prior_cur = asarray([p.prior(P_cur[i]) for i, p in enumerate(self.parameters)])
+            prior_cur = asarray([p.prior(P_cur[i], P_cur) for i, p in enumerate(self.parameters)])
             X_cur = self.chifun(P_cur)
 
             at_test = np.zeros(self.n_parms, dtype=np.int)
@@ -47,7 +47,7 @@ class GibbsMCMC(MCMC):
                 for i_t in xrange(self.thinning):
                     for i_p, p in enumerate(self.parameters):
                         P_try[i_p] = p.draw(P_cur[i_p])
-                        prior_try[i_p] = p.prior(P_try[i_p])
+                        prior_try[i_p] = p.prior(P_try[i_p], P_try)
                         X_try =  self.chifun(P_try)
 
                         prior_ratio = prior_try.prod() / prior_cur.prod()
@@ -193,6 +193,24 @@ class GibbsMCMCResult(MCMCResult):
         t = self.accepted.sum(0)
         r = np.where(t[:,0]>0, t[:,1]/t[:,0], 0)
         return r
+
+    def get_samples(self, burn, thinning, name=None):
+        if name is None:
+            return {p: self.steps[:, burn::thinning, i].ravel() for i, p in enumerate(self.p_names)}
+        else:
+            return self.steps[:,  burn::thinning, list(self.p_names).index(name)].ravel()
+
+    def get_quantiles(self, burn, thinning, quantiles=[0.5-0.341, 0.5, 0.5+0.341]):
+        from scipy.stats.mstats import mquantiles
+        data = self.get_samples(burn, thinning)
+        return {p: mquantiles(d, quantiles) for p, d in data.items()}
+
+    #TODO: Replace with get_max_likelihood
+    def get_chi_minimum_point(self):
+        minid = self.chi.argmin()
+        pv = {p: self.steps[:,:,i].ravel()[minid] for i, p in enumerate(self.p_names)}
+        pv['ChiSqr'] = self.chi.min()
+        return pv
 
     def plot(self, i_c, burn_in, thinning, fign=100, s_max=-1, c='b', alpha=1.0):
         fig = pl.figure(fign, figsize=(34,20), dpi=50)
