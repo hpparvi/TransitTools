@@ -292,7 +292,12 @@ contains
     n  = [(i, i=0,size(u))]
     b  = r/(1._fd+r)
     c  = z/(1._fd+r)
-    uu = [u(1)+2._fd*u(2), -u(2)]
+    !TODO: FIXME, I'M A HACK
+    if (size(u) == 2) then
+       uu = [u(1)+2._fd*u(2), -u(2)]
+    else
+       uu = [u(1), 0.0d0]
+    end if
 
     do j=0,size(u)
        call alpha(b, c, j, npol, a(:,j+1))
