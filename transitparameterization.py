@@ -119,15 +119,18 @@ parameters = {'tc' : TransitParameter('tc',  'transit center',       'HJD', [-1e
 
 parameterizations   = {'orbit'    : ['k',  'tc', 'p',  'a',  'i'],
                        'physical' : ['k',  'tc', 'p',  'a',  'b'],
-                       'kipping'  : ['k2', 'tc', 'p', 'it', 'b2']}
+                       'kipping'  : ['k2', 'tc', 'p', 'it', 'b2'],
+                       'btest'    : ['k2', 'tc', 'p', 'it',  'b']}
 
 mappings = { 'k' : [Mapping('k',           ['k2'], '$k = sqrt($k2)'    )],
-             'a' : [Mapping('a',  ['p','it','b2'], '$a = sqrt( (1.-$b2) / sin(TWO_PI/($p*$it))**2 + $b2)')],
+             'a' : [Mapping('a',  ['p','it','b2'], '$a = sqrt( (1.-$b2) / sin(TWO_PI/($p*$it))**2 + $b2)'),
+                    Mapping('a',   ['p','it','b'], '$a = sqrt( (1.-$b**2) / sin(TWO_PI/($p*$it))**2 + $b**2)')],
              'b' : [Mapping('b',        ['a','i'], '$b = $a*cos($i)'   ),
                     Mapping('b',           ['b2'], '$b = sqrt($b2)'    )],
              'i' : [Mapping('i',        ['a','b'], '$i = acos($b/$a)'  ),
                     Mapping('i',       ['a','b2'], '$i = acos(sqrt($b2)/$a)'  ),
-                    Mapping('i',  ['p','it','b2'], '$i = acos(sqrt($b2)/sqrt((1.-$b2)/sin(TWO_PI/($it*$p))**2+$b2))'  )],
+                    Mapping('i',  ['p','it','b2'], '$i = acos(sqrt($b2)/sqrt((1.-$b2)/sin(TWO_PI/($it*$p))**2+$b2))'  ),
+                    Mapping('i',   ['p','it','b'], '$i = acos(sqrt($b**2)/sqrt((1.-$b**2)/sin(TWO_PI/($it*$p))**2+$b**2))' )],
             'b2' : [Mapping('b2',           ['b'], '$b2 = $b*$b'       ),
                     Mapping('b2',       ['a','i'], '$b2 = ($a*cos($i))**2')],
             'it' : [Mapping('it',   ['a','i','p'], '$it = TWO_PI/$p/asin(sqrt(1.-$a*$a*cos($i)**2)/($a*sin($i)))'),
