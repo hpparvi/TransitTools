@@ -6,23 +6,26 @@ A module to carry out parameter fitting error estimation using Markov Chain
 Monte Carlo simulation. 
 """
 
+from numpy.random import random, randint
+from copy import deepcopy
 from mcmc import *
 
 class PTMCMCChain(object):
-    def __init__(self, id, n_parms, n_steps, n_points, p0, temperature, parameters, chifun, acceptStepFunc):
+    def __init__(self, id, n_parms, n_steps, n_points, p0, temperature, parameters, fitpar, chifun, acceptStepFunc):
         self.n_parms  = n_parms
         self.n_steps  = n_steps
         self.n_points = n_points
         self.id       = id
 
         self.parameters = deepcopy(parameters)
+        self.fitpar      = fitpar
         self.temperature = temperature
 
         self.P_cur = p0.copy()
         self.P_try = p0.copy()
-        self.X_cur = chifun(p0[:-1])
-        self.X_try = chifun(p0[:-1])
-        self.prior_cur  = np.array([p.prior(vp) for p, vp in zip(parameters, p0)])
+        self.X_cur = chifun(p0)
+        self.X_try = chifun(p0)
+        self.prior_cur  = np.array([p.prior(vp, p0) for p, vp in zip(parameters, p0)])
         self.prior_try  = self.prior_cur.copy()
 
         self.chifun     = chifun
@@ -37,19 +40,21 @@ class PTMCMCChain(object):
 
     def draw_trial_step(self, ip):
         self.P_try[ip] = self.parameters[ip].draw(self.P_cur[ip])
-        self.prior_try[ip] = self.parameters[ip].prior(self.P_try[ip])
-        self.X_try =  self.chifun(self.P_try[:-1])
+        self.prior_try[ip] = self.parameters[ip].prior(self.P_try[ip], self.P_try)
+        self.X_try =  self.chifun(self.P_try)
         self.acceptance[ip, 0] += 1
 
     def try_trial_step(self):
-        if self.X_try < 1e17:
-            prior_ratio = self.prior_try.prod() / self.prior_cur.prod()
-            error_ratio = (self.P_try[-1] / self.P_cur[-1])
-            error_ratio = error_ratio if error_ratio > 1e-18 else 1e-18
-            return self.acceptStep(self.P_cur[-1]*self.X_cur, self.P_try[-1]*self.X_try, prior_ratio, error_ratio, self.temperature)
+        prior_ratio = self.prior_try.prod() / self.prior_cur.prod()
+        err_t = self.fitpar.get_error_scale(self.P_try)
+        err_c = self.fitpar.get_error_scale(self.P_cur)
+        error_ratio = err_t / err_c
+
+        if prior_ratio > 1e-18:
+            return self.acceptStep(err_c*self.X_cur, err_t*self.X_try, prior_ratio, error_ratio, self.temperature)
         else:
             return False
-        
+
     def accept_trial_step(self, ip):
         self.P_cur[ip] = self.P_try[ip]
         self.prior_cur[ip] = self.prior_try[ip]
@@ -104,15 +109,12 @@ class PTMCMC(MCMC):
         
         temperatures = [1., 0.65, 0.40, 0.20, 0.085, 0.03]
         self.chains = [PTMCMCChain(i, self.n_parms, self.n_steps, self.n_points, self.p0,
-                                   temperatures[i], self.parameters, self.chifun,
+                                   temperatures[i], self.parameters, self.fitpar, self.chifun,
                                    self._acceptStepChiLikelihood)
                        for i in range(self.n_chains_l)]
 
         self.result = PTMCMCResult(self.n_chains_l, self.n_steps, self.n_parms,
                                    self.p_names, self.p_descr)
-
-        acceptionTypes = {'ChiLikelihood':self._acceptStepChiLikelihood}
-        self.acceptStep = acceptionTypes['ChiLikelihood']
 
 
     def _acceptStepChiLikelihood(self, X0, Xt, prior_ratio, error_ratio, temperature=1):
@@ -136,11 +138,12 @@ class PTMCMC(MCMC):
 
     def _mcmc(self, *args):
         """The main Markov Chain Monte Carlo routine in all its simplicity."""
-        if self.with_curses: self.init_curses()
+        if self.use_curses: self.init_curses()
         self.swaps = []
 
         ## MCMC main loop
         ## ==============
+        i_at = 0
         for i_s in xrange(self.n_steps):
             self.i_step = i_s
 
@@ -161,15 +164,17 @@ class PTMCMC(MCMC):
                     if swap: self.swaps.append(i_s)
 
 
-            ## Autotuning
-            ## ==========
-            if i_s < self.autotune_length and (i_s+1)%25 == 0:
-                for ic, c in enumerate(self.chains):
-                    for ip, p in enumerate(c.parameters):
-                        accept_ratio  = c.autotune_test[ip]/(25.*self.thinning)
-                        accept_adjust = (1. - self.autotune_strength) + self.autotune_strength*4.* accept_ratio
-                        p._draw_method.sigma *= accept_adjust
-                    c.autotune_test[:] = 0.
+                ## Autotuning
+                ## ==========
+                if i_s*self.thinning + it < self.autotune_length and i_at == 25:
+                    for ic, c in enumerate(self.chains):
+                        for ip, p in enumerate(c.parameters):
+                            accept_ratio  = c.autotune_test[ip]/25.
+                            accept_adjust = (1. - self.autotune_strength) + self.autotune_strength*4.* accept_ratio
+                            p.draw_function.sigma *= accept_adjust
+                        c.autotune_test[:] = 0.
+                    i_at = 0
+                i_at += 1
 
             for ic, chain in enumerate(self.chains):
                 self.result.steps[ic, i_s, :] = chain.P_cur
@@ -183,7 +188,7 @@ class PTMCMC(MCMC):
             if (i_s+1)%self.sinterval == 0:
                 self.result.save(self.sname)
 
-            if self.with_curses: self.ui.update()
+            if self.use_curses: self.ui.update()
 
         ## MPI communication
         ## =================
@@ -292,10 +297,10 @@ class PTMCMCCursesUI(object):
 
         for i, chain in enumerate(self.mcmc.chains):
             self.aw.addstr(2+i,1,' '.join(['{0:^10.1%}'.format(a) for a in chain.get_acceptance()]))
-            self.sw.addstr(2+i,1,' '.join(['{0:^10.6f}'.format(s) for s in [p._draw_method.sigma for p in chain.parameters]]))
+            self.sw.addstr(2+i,1,' '.join(['{0:^10.6f}'.format(s) for s in [p.draw_function.sigma for p in chain.parameters]]))
             self.iw.addstr(7+i,3,'Tried: {}  Succeeded: {}  Succes rate: {}'.format(chain.swaps_tried,
                                                                                                 chain.swaps_succeeded,
-                                                                                                0 if chain.swaps_tried == 0 else chain.swaps_succeeded/chain.swaps_tried))
+                                                                                                0 if chain.swaps_tried == 0 else chain.swaps_succeeded/float(chain.swaps_tried)))
 
 class PTMCMCResult(MCMCResult):
     def __init__(self, n_chains, n_steps, n_parms, p_names, p_descr, burn_in = 0.2, cor_len=1):
@@ -318,6 +323,12 @@ class PTMCMCResult(MCMCResult):
         i = list(self.p_names).index(parameter)
         return self.steps[0, burn_in::thinning, i]
 
+
+    def get_samples(self, burn, thinning, name=None):
+        if name is None:
+            return {p: self.steps[0, burn::thinning, i].ravel() for i, p in enumerate(self.p_names)}
+        else:
+            return self.steps[0,  burn::thinning, list(self.p_names).index(name)].ravel()
     
     def get_acceptance(self):
         """Returns the acceptance ratio for the parameters."""

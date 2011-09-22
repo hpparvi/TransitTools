@@ -274,7 +274,7 @@ class MCMCResult(FitResult):
     def plot(self, i_c, burn_in, thinning, fign=100, s_max=-1, c='b', alpha=1.0):
         raise NotImplementedError
 
-    def plot_parameter_distribution(self, name, burn, thinning, ax=None, **kwargs):
+    def plot_parameter_distribution(self, data, burn, thinning, ax=None, **kwargs):
         """
         
         Parameters
@@ -306,11 +306,14 @@ class MCMCResult(FitResult):
         xlim  = kwargs.get('xlim', None)
         rnge  = kwargs.get('range', None)
         xlabel = kwargs.get('xlabel', None)
+        verbose = kwargs.get('verbose', False)
 
-        if isinstance(name,str):
-            d = self.get_samples(burn, thinning, name)
-        elif isinstance(name, np.ndarray):
-            d = name
+        if isinstance(data,str):
+            d = self.get_samples(burn, thinning, data)
+            name = kwargs.get('name',None) or data
+        elif isinstance(data, np.ndarray):
+            d = data
+            name = kwargs.get('name','')
         else:
             raise NotImplementedError
 
@@ -334,7 +337,7 @@ class MCMCResult(FitResult):
             except ValueError:
                 xlabel = ''
 
-        ax.hist(d, nbins, range=rnge, fc=fc, histtype='stepfilled', normed=True, lw=1)
+        n,b,p = ax.hist(d, nbins, range=rnge, fc=fc, histtype='stepfilled', normed=True, lw=1)
 
         if kwargs.get('median', False):
             ax.axvline(np.median(d), c='0.25', lw=1.5)
@@ -349,25 +352,44 @@ class MCMCResult(FitResult):
             tt = np.linspace(d.min(), d.max(), 500)
             if kwargs.get('fit_n', 1) == 1:
                 map, ep, em = fit_distribution(d)
-                ax.plot(tt, asymmetric_gaussian(tt, map, ep, em), c='0.0', lw=2)
+                #ax.plot(tt, asymmetric_gaussian(tt, map, ep, em), c='0.0', lw=2)
+                if verbose: print "{name:10s} {map:12.6f} {psigma:+12.6f} {msigma:+12.6f}".format(name=name, map=map, psigma=ep-map, msigma=em-map)
+
+                ax.axvline(map, c='0.25', lw=2.)
+                ax.axvline(ep, ls='--', c='0.5', lw=1.5)
+                ax.axvline(em, ls='--', c='0.5', lw=1.5)
+                ax.fill_between([em,ep],0,1e8, facecolor='0.0', edgecolor='1.0', alpha=0.15)
+
             else:
                 map, ep, em, map2, ep2, em2, x = fit_distribution2(d)
                 ft = ((1-x)*asymmetric_gaussian(tt, map, ep, em)
                       + x*asymmetric_gaussian(tt, map2, ep2, em2))
-                #ax.plot(tt, asymmetric_gaussian(tt, map, ep, em), c='0.25', ls='--', lw=1)
-                #ax.plot(tt, asymmetric_gaussian(tt, map2, ep2, em2), c='0.25', ls='--', lw=1)
-                ax.plot(tt, ft, c='0.0', lw=2)
+                #ax.plot(tt, (1-x)*asymmetric_gaussian(tt, map, ep, em), c='0.25', ls='--', lw=1)
+                #ax.plot(tt, x*asymmetric_gaussian(tt, map2, ep2, em2), c='0.25', ls='--', lw=1)
+                #ax.plot(tt, ft, c='0.0', lw=2)
 
-                map = tt[ft.argmax()]
-                em  = mquantiles(d[d<map],[1-2*0.341])[0]
-                ep  = mquantiles(d[d>map],[2*0.341])[0]
+                diff = np.sign(np.diff(ft))
+                mask = diff[:-1]>diff[1:]
+                map = tt[mask]
 
-            ax.axvline(map, c='0.25', lw=2.)
-            ax.axvline(ep, ls='--', c='0.5', lw=1.5)
-            ax.axvline(em, ls='--', c='0.5', lw=1.5)
-            ax.fill_between([em,ep],0,1e8, facecolor='0.9', edgecolor='1.0')
+                em  = [mquantiles(d[d<m],[1-2*0.341])[0] for m in map]
+                ep  = [mquantiles(d[d>m],[2*0.341])[0] for m in map]
 
-        ax.set_xlabel(xlabel)
+                c = ['r','b','g']
+                c = ['0.25','0.25','0.25']
+
+                for i, m in enumerate(map):
+                    if verbose: print "{name:10s} {map:12.6f} {psigma:+12.6f} {msigma:+12.6f} ({i})".format(name=name, map=m, psigma=ep[i]-m, msigma=em[i]-m,i=i+1)
+                
+                    ax.axvline(m, c=c[i], lw=2.)
+                    ax.axvline(ep[i], ls='--', c=c[i], lw=1.5)
+                    ax.axvline(em[i], ls='--', c=c[i], lw=1.5)
+                    ax.fill_between([em[i],ep[i]],0,1e8, facecolor=c[i], edgecolor='1.0', alpha=0.15)
+
+        ymax = max(n.max(), ax.get_ylim()[1])
+        ax.set_ylim([0, 1.05*ymax])
+        
+        ax.set_xlabel(xlabel, size='x-large')
         ax.set_title(kwargs.get('title', ''))
         ax.set_xlim(xlim)
         ax.set_yticks([])
@@ -376,17 +398,25 @@ class MCMCResult(FitResult):
     def plot_2d_distribution(self, names, burn, thinning, ax=None, **kwargs):
         from scipy.stats.mstats import mquantiles
         from numpy import sqrt, log
+        from matplotlib.cm import gray_r
+
         transformations = kwargs.get('transformations', [None,None])
         gridsize = kwargs.get('gridsize',50)
         extent = kwargs.get('extent', None)
         xlim = kwargs.get('xlim', None)
         ylim = kwargs.get('ylim', None)
-        xlabel = kwargs.get('xlabel', '')
-        ylabel = kwargs.get('ylabel', '')
+        xlabel = kwargs.get('xlabel', None)
+        ylabel = kwargs.get('ylabel', None)
 
         ax = ax or pl.axes()
-        d = [self.get_samples(burn, thinning, names[0]),
-             self.get_samples(burn, thinning, names[1])]
+        d = []
+        for name in names:
+            if isinstance(name,str):
+                d.append(self.get_samples(burn, thinning, name))
+            elif isinstance(name, np.ndarray):
+                d.append(name)
+            else:
+                raise NotImplementedError
 
         for i, t in enumerate(transformations):
             if t is not None: d[i] = eval(transformations[i].format('d[%i]'%i))
@@ -397,10 +427,14 @@ class MCMCResult(FitResult):
         if extent is None:
             extent = [xlim[0],xlim[1],ylim[0],ylim[1]]
 
-        ax.hexbin(d[0],d[1], gridsize=gridsize, extent=extent)
+        ax.hexbin(d[0],d[1], gridsize=gridsize, extent=extent, cmap=gray_r)
         ax.set_xlim(xlim)
         ax.set_ylim(ylim)
-        pl.setp(ax, xlabel=xlabel or names[0], ylabel=ylabel or names[1])
+        if xlabel != '': pl.setp(ax, xlabel=xlabel or names[0])
+        if ylabel != '': pl.setp(ax, ylabel=ylabel or names[1])
+
+        #pl.setp(ax, xlabel=xlabel or names[0], ylabel=ylabel or names[1])
+
 
 def load_MCMCResult(filename):
     f = open(filename, 'rb')
@@ -438,7 +472,7 @@ def fit_distribution2(data):
     from scipy.optimize import fmin
     from scipy.stats.mstats import mquantiles
 
-    x = mquantiles(data, [0.45, 0.45+0.341, 0.45-0.341, 0.55, 0.55+0.341, 0.55-0.341, 0.5])
+    x = mquantiles(data, [0.35, 0.35+0.341, 0.35-0.341, 0.35, 0.65+0.341, 0.65-0.341, 0.5])
     bv, be = np.histogram(data, 150, normed=True)
     bc = 0.5*(be[:-1]+be[1:])
     x[6] = 0.5

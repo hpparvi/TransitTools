@@ -137,7 +137,7 @@ class MTFitParameterization(object):
         ## --- Geometric parameters ---
         add_parameter(self.fit_transit_center, 'tc') 
         add_parameter(self.fit_period, 'p') 
-        add_parameter(self.fit_impact_parameter, 'b^2')
+        add_parameter(self.fit_impact_parameter, 'b')
 
         ## --- Transit width ---
         ## We can either fit the (inverse) transit width or use the estimated stellar
@@ -152,12 +152,20 @@ class MTFitParameterization(object):
         ## --- Limb darkening ---
         ##
         if self.n_ldc == 1:
-            for i in range(self.nch):
-                add_parameter(self.fit_limb_darkening, 'u %i'%i)
+            if self.separate_ld:
+                for i in range(self.nch):
+                    add_parameter(self.fit_limb_darkening, 'u %i'%i)
+            else:
+                add_parameter(self.fit_limb_darkening, 'u 0')
+
         elif self.n_ldc == 2:
-            for i in range(self.nch):
-                add_parameter(self.fit_limb_darkening, 'u %i + v %i'%(i,i))
-                add_parameter(self.fit_limb_darkening, 'u %i - v %i'%(i,i))
+            if self.separate_ld:
+                for i in range(self.nch):
+                    add_parameter(self.fit_limb_darkening, 'u %i + v %i'%(i,i))
+                    add_parameter(self.fit_limb_darkening, 'u %i - v %i'%(i,i))
+            else:
+                add_parameter(self.fit_limb_darkening, 'u 0 + v 0')
+                add_parameter(self.fit_limb_darkening, 'u 0 - v 0')
 
         ## --- Transit timing variations ---
         ##
@@ -169,6 +177,11 @@ class MTFitParameterization(object):
         ##
         if 'contamination' in parameters.keys():
             add_parameter(False, 'contamination', 'om')
+
+        ## --- Stellar density ---
+        ##
+        if 'density' in parameters.keys():
+            add_parameter(False, 'density', 'om')
 
         ## --- Error scale ---
         ##
@@ -216,7 +229,7 @@ class MTFitParameterization(object):
             
         ## Generate getters
         ## ================
-        self._generate_b2_getter()
+        self._generate_b_getter()
         self._generate_ld_getter()
         self._generate_zp_getter()
         self._generate_p_getter()
@@ -227,7 +240,8 @@ class MTFitParameterization(object):
         ## Generate mappings
         ## =================
         self.map_p_to_k = generate_mapping("physical","kipping")
-        self.map_k_to_p = generate_mapping("kipping","physical")
+        #self.map_k_to_p = generate_mapping("kipping","physical")
+        self.map_k_to_p = generate_mapping("btest","physical")
 
         info('Parameter vector length: %i' %self.fp_vect.size, I1)
         info('')
@@ -252,11 +266,34 @@ class MTFitParameterization(object):
 
     ## Obtain the Kipping's transit width parameter and the semi-major axis using Kepler's third law
     ## =============================================================================================
-    def kipping_i(self, period, b2):
+    def inv_half_twidth_b2(self, period, b2):
         ac = ((G*self.pv['Sm']/TWO_PI**2)**(1/3)) / self.pv['Sr']
         a = ac * (d_to_s*period)**(2/3)
         it = TWO_PI/period/asin(sqrt(1-b2)/(a*sin(acos(sqrt(b2)/a))))
         return it
+
+    def inv_half_twidth_b(self, period, b):
+        ac = ((G*self.pv['Sm']/TWO_PI**2)**(1/3)) / self.pv['Sr']
+        a = ac * (d_to_s*period)**(2/3)
+        it = TWO_PI/period/asin(sqrt(1-b**2)/(a*sin(acos(b/a))))
+        return it
+
+    ## Impact parameter
+    ## ========================
+    def _generate_b_str(self):
+        ps = self.parameter_string['b']
+        if self.fit_impact_parameter:
+            return "{}[{}]".format(ps[0], ps[1])
+        else:
+            return self._generate_cp_str('b')
+
+    def _generate_b_getter(self):
+        src  = "def get_b(self, p, ch=0, tn=0):\n"
+        src += "  return {}\n".format(self._generate_b_str())
+
+        exec(src)
+        self.get_b_src = src
+        self.get_b = MethodType(get_b, self, MTFitParameterization)
 
 
     ## Squared impact parameter
@@ -275,6 +312,7 @@ class MTFitParameterization(object):
         exec(src)
         self.get_b2_src = src
         self.get_b2 = MethodType(get_b2, self, MTFitParameterization)
+
 
         
     ## Period
@@ -358,7 +396,7 @@ class MTFitParameterization(object):
            else:
                return self._generate_cp_str('it')
        else:
-           return "self.kipping_i(%s[%i], %s)\n"%(ps['p']+(self._generate_b2_str(),))
+           return "self.inv_half_twidth_b(%s[%i], %s)\n"%(ps['p']+(self._generate_b_str(),))
 
 
     ## Kipping parameterization
@@ -374,7 +412,8 @@ class MTFitParameterization(object):
         src += "  p_out[1] = %s[%i]\n"%ps['tc']
         src += "  p_out[2] = %s\n"%(self._generate_p_str())
         src += "  p_out[3] = %s\n"%(self._generate_inverse_transit_halfwidth_str())
-        src += "  p_out[4] = %s\n"%self._generate_b2_str()
+        #src += "  p_out[4] = %s\n"%self._generate_b2_str()
+        src += "  p_out[4] = %s\n"%self._generate_b_str()
         src += "  return p_out\n"
 
         exec(src)
@@ -394,6 +433,23 @@ class MTFitParameterization(object):
         exec(src)
         self.get_contamination_src = src
         self.get_contamination = MethodType(get_contamination, self, MTFitParameterization)
+
+
+    ## Stellar density
+    ## ===============
+    def _generate_density_getter(self):
+        src="def get_density(self, p, ch=0):\n"
+        if 'density' in self.p_names:
+            src += "  return "+self._generate_cp_str('density')
+        else:
+            src += "  return 0."
+
+        exec(src)
+        self.get_contamination_src = src
+        self.get_contamination = MethodType(get_contamination, self, MTFitParameterization)
+
+    #def get_density(self, p):
+    #    return 1e-3 * 3*pi*semimajor_axis(d)**3 / (G*(d['p']*24*60*60)**2)
 
 
     ## Error scale

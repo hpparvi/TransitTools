@@ -1,7 +1,9 @@
 from transitLightCurve.core import *
 from transitfitter import Fitter
 from fitnessfunction import FitnessFunction
-from ptmcmc import PTMCMC
+from ptgibbsmcmc import PTMCMC
+#from ptmcmc import PTMCMC
+
 from gibbsmcmc import GibbsMCMC
 
 class MultiTransitMCMC(Fitter):

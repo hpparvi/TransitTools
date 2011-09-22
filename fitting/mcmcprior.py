@@ -80,8 +80,8 @@ class B2Prior(Prior):
 
 
 class LinCombPrior(Prior):
-    def __init__(self, P1, P2, idx1, idx2):
-        super(LinCombPrior, self).__init__(-1, 1) # This is a quick hack, fix!
+    def __init__(self, P1, P2, idx1, idx2, lim=(-1,1)):
+        super(LinCombPrior, self).__init__(*lim)
         self.p1, self.i1 = P1, idx1
         self.p2, self.i2 = P2, idx2
         

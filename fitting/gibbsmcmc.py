@@ -91,7 +91,10 @@ class GibbsMCMC(MCMC):
                 if (i_s+1)%self.sinterval == 0:
                     self.result.save(self.sname)
 
-                if self.use_curses: self.ui.update()
+                if self.use_curses:
+                    self.ui.update()
+                else:
+                    print i_s
 
         ## MPI communication
         ## =================

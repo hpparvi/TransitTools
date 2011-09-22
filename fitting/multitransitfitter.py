@@ -60,6 +60,7 @@ class MTFitResult(FitResult):
         ## Save the parameterization
         ## =========================
         self.parameterization = copy(fit_prm)
+        self.parameterization.get_b = None
         self.parameterization.get_b2 = None
         self.parameterization.get_ldc = None
         self.parameterization.get_zp = None
