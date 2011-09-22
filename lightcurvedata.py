@@ -94,7 +94,7 @@ class SingleTransit(object):
         info("      Rejected %i outliers"%(~bmask).sum())
 
 
-    def clean_with_lc(self, lc_solution, n_iter=5, top=3., bottom=3., **kwargs):
+    def clean_with_lc(self, lc_solution, n_iter=5, top=3., bottom=6., **kwargs):
         info("Cleaning data with an light curve solution", H1)
         time = self.time
         flux = self.get_flux(apply_bad_mask=False)
@@ -266,11 +266,11 @@ class MultiTransitLC(object):
 
         ## Clean up a possible periodic signal if a period is given
         ## --------------------------------------------------------
-        # if 'ps_period' in kwargs.keys():
-        #     logging.info('    Cleaning a periodic error signal')
-        #     for t in self.transits:
-        #         t.fit_periodic_signal(kwargs['ps_period'])
-        # logging.info('')
+        #if 'ps_period' in kwargs.keys():
+        #    logging.info('    Cleaning a periodic error signal')
+        #    for t in self.transits:
+        #        t.fit_periodic_signal(kwargs['ps_period'])
+        #logging.info('')
 
         ## Remove transits with a high point-to-point scatter
         ## --------------------------------------------------

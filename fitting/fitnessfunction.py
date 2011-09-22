@@ -41,7 +41,7 @@ class FitnessFunction(object):
         self.gz = parm.get_zp
         self.gl = parm.get_ldc
         self.gt = parm.get_ttv
-        self.gb = parm.get_b2
+        self.gb = parm.get_b
         self.gc = parm.get_contamination
 
         self.times  = [t.get_time()               for t in data]
@@ -76,10 +76,10 @@ class FitnessFunction(object):
             self.ivars[i] *= kwargs.get('ivar_multiplier', 1.)
 
         method   = kwargs.get('method', 'fortran')
-        npol     = kwargs.get('n_pol', 500)
-        nthreads = kwargs.get('n_threads', 1)
+        npol     = kwargs.get('n_pol', 300)
+        nthreads = kwargs.get('n_threads', 0)
 
-        self.lc = TransitLightcurve(TransitParameterization('kipping', [0.1,0,5,10,0]),
+        self.lc = TransitLightcurve(TransitParameterization('btest', [0.1,0,5,10,0]),
                                     method=method, ldpar=[0], n_threads=nthreads, npol=npol,
                                     eccentric=self.eccentric)
 
@@ -120,13 +120,13 @@ class FitnessFunction(object):
 
         ## Limb-darkening
         ## ==============
-        if self.parm.separate_ld:
-            for ch in channels:
-                addl(c, "    ld{ch} = self.gl(p_fit, {ch})".format(ch=ch))
-                addl(c, "    if ld{ch}[0] < 0. or ld{ch}[0] > 1.: return 1e18".format(ch=ch))
-        else:
-            addl(c, "    ld = self.gl(p_fit)")
-            addl(c, "    if ld[0] < 0. or ld[0] > 1.: return 1e18")
+        #if self.parm.separate_ld:
+        for ch in channels:
+            addl(c, "    ld{chid} = self.gl(p_fit, {ch})".format(chid=ch, ch=ch if self.parm.separate_ld else 0))
+            addl(c, "    if ld{ch}[0] < 0. or ld{ch}[0] > 1.: return 1e18".format(ch=ch))
+        #else:
+         #   addl(c, "    ld = self.gl(p_fit)")
+          #  addl(c, "    if ld[0] < 0. or ld[0] > 1.: return 1e18")
 
         if not self.parm.separate_k2_ch and not self.parm.separate_zp_tr and not self.parm.fit_ttv:
             addl(c, "    kp = self.gk(p_fit)")

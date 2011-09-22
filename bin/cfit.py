@@ -49,7 +49,7 @@ from transitLightCurve.transitparameterization import TransitParameterization
 
 from transitLightCurve.fitting.fitparameterization import MTFitParameter
 from transitLightCurve.fitting.mcmc import DrawGaussian
-from transitLightCurve.fitting.mcmcprior import UniformPrior, GaussianPrior, JeffreysPrior, InverseSqrtPrior
+from transitLightCurve.fitting.mcmcprior import UniformPrior, GaussianPrior, JeffreysPrior, InverseSqrtPrior, LinCombPrior
 from transitLightCurve.fitting.fitparameterization import MTFitParameterization
 
 import transitLightCurve.io.corot as CoRoT
@@ -93,6 +93,7 @@ def main():
 
     ds_pars = {'ftol':1e-4, 'disp':False}
 
+    combine_channels = cp.getboolean('General','combine_channels')
     do_initial_fit  = cp.getboolean('General','do_initial_fit') and opt.do_initial_fit
     do_final_fit  = cp.getboolean('General','do_final_fit') and opt.do_final_fit
     do_mcmc = cp.getboolean('General','do_mcmc') and opt.do_mcmc
@@ -101,7 +102,11 @@ def main():
     for p in fit_pars.items():
         if p[1].lower() == 'true': fit_pars[p[0]] = True
         elif p[1].lower() == 'false': fit_pars[p[0]] = False
-        else: fit_pars[p[0]] = float(p[1])
+        else:
+            try:
+                fit_pars[p[0]] = float(p[1])
+            except ValueError:
+                fit_pars[p[0]] = p[1]
 
     fit_pars['n_threads'] = cp.getint('General','n_threads')
 
@@ -142,7 +147,8 @@ def main():
     def load_corot_data(ct):
         return import_as_MTLC(ct, w_period, w_transit, maxpts=maxpts,
                               clean_pars=clean_pars,
-                              ps_period=CoRoT.orbit_period)
+                              ps_period=CoRoT.orbit_period,
+                              combine_channels=combine_channels)
 
 
     def fit_corot(ct, data, parameterization, de_pars):
@@ -170,7 +176,16 @@ def main():
 
     if with_mpi:
         data = mpi_comm.bcast(data)
-        
+       
+
+    # P = 0.853585; tc = 2454398.0767
+    # p  = fold(data[0].get_time(), P, origo=tc, shift=0.5)-0.5
+
+    # pbt, fbt, ebt = bin(p,data[0].get_flux(),100)
+    # pl.plot(pbt, fbt, '.')
+    # pl.show()
+    # exit()
+ 
     ##########################################################################################
     ##
     ## MINIMIZATION
@@ -181,7 +196,6 @@ def main():
                                              data[0].n_transits,
                                              mode='o',
                                              **fit_pars)
-
     ## Initial fit
     ## ===========
     if do_initial_fit:
@@ -198,7 +212,7 @@ def main():
         tp = TransitParameterization('physical', mres.ephemeris)
         for i, d in enumerate(data):
             lc = TransitLightcurve(tp, ldpar=mres.ldc[i], method='fortran', mode='time')
-            d.clean_with_lc(lc, top=3., bottom=3.)
+            d.clean_with_lc(lc, top=5., bottom=12.)
         if opt.plot_transits: plot_transits(600, data, ct, '%s_cleaned_transits.pdf'%ct.basename, lc)
 
     if with_mpi:
@@ -213,13 +227,25 @@ def main():
     else:
         mres = load_MTFitResult(fn_final)
 
+    # P = mres.e[2]; tc = mres.e[1]
+    # p  = fold(data[0].get_time(), P, origo=tc, shift=0.5)-0.5
+
+    # tp = TransitParameterization('physical', mres.ephemeris)
+    # lc = TransitLightcurve(tp, ldpar=mres.ldc[i], method=method, mode='phase')
+    # p2 = np.linspace(p.min(),p.max(), 2000)
+
+    # pbt, fbt, ebt = bin(p,data[0].get_flux(),100)
+    # pl.plot(pbt, fbt, '.')
+    # pl.plot(p2, lc(2*np.pi*p2))
+    # pl.show()
+    # exit()
+
     ##########################################################################################
     ##
     ## MCMC
     ## ====
     ##
     if do_mcmc:
-        
         parameterization = parameterization.mcmc_from_opt(mres.pv)
         mcmc = MultiTransitMCMC(data, parameterization, mcmc_pars, **fit_pars)
         mcmcres = mcmc()
@@ -296,7 +322,7 @@ def main():
 
     pb = []; fb = []; eb = []
     for i in range(len(data)):
-        pbt, fbt, ebt = bin(p[i],f[i],100)
+        pbt, fbt, ebt = bin(p[i],f[i],50)
         pb.append(pbt)
         fb.append(fbt)
         eb.append(ebt)
