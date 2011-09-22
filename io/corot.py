@@ -46,7 +46,7 @@ def import_as_MTLC(ctarget, width=0.2, twidth=None, maxpts=None, **kwargs):
     hdu_d = pf.open(ctarget.file)
     dat_d = hdu_d[1].data
 
-    remove_contamination = kwargs.get('remove_contamination', True)
+    combine_channels = kwargs.get('combine_channels', False)
 
     stat = dat_d.field('STATUS')
     maskOutOfRange = np.bitwise_and(stat, 1) == 0
@@ -57,12 +57,25 @@ def import_as_MTLC(ctarget, width=0.2, twidth=None, maxpts=None, **kwargs):
 
     flux = []; fdev = []
     if not ctarget.colors:
+        chs = ['w']
         flux.append(dat_d.field('whiteflux')[mask].copy().astype(np.float64))
         fdev.append(dat_d.field('whitefluxdev')[mask].copy().astype(np.float64))
     else:
-        for ch in ['r','g','b']:
-            flux.append(dat_d.field( channel_fits_names[ch]+'flux')[mask].copy().astype(np.float64))
-            fdev.append(dat_d.field( channel_fits_names[ch]+'fluxdev')[mask].copy().astype(np.float64))
+        if not combine_channels:
+            chs = ['r','g','b']
+            for ch in chs:
+                flux.append(dat_d.field( channel_fits_names[ch]+'flux')[mask].copy().astype(np.float64))
+                fdev.append(dat_d.field( channel_fits_names[ch]+'fluxdev')[mask].copy().astype(np.float64))
+        else:
+            chs = ['w']
+            flux.append(dat_d.field('redflux')[mask].copy().astype(np.float64)+
+                        dat_d.field('greenflux')[mask].copy().astype(np.float64)+
+                        dat_d.field('blueflux')[mask].copy().astype(np.float64))
+
+            fdev.append(np.sqrt(dat_d.field('redfluxdev')[mask].copy().astype(np.float64)**2+
+                        dat_d.field('greenfluxdev')[mask].copy().astype(np.float64)**2+
+                        dat_d.field('bluefluxdev')[mask].copy().astype(np.float64)**2))
+                
 
     expmask = fdev[-1] < 1e-7
     date[expmask]  -= 16./(60.*60.*24.)
@@ -72,12 +85,12 @@ def import_as_MTLC(ctarget, width=0.2, twidth=None, maxpts=None, **kwargs):
     maxpts = maxpts or -1 
     
     mtlc = []
-    for i, ch in zip(range(len(flux)), ['r','g','b']):
+    for i, ch in zip(range(len(flux)), chs):
         mtlc.append(MultiTransitLC(channel_fits_names[ch], date[:maxpts]+time_origin,
                                    flux[i][:maxpts], fdev[i][:maxpts],
                                    ctarget.transit_center, ctarget.planet_period,
                                    width, twidth, channel=ch, **kwargs))
-
+        
     return mtlc
 
 
