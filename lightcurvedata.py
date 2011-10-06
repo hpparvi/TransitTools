@@ -86,6 +86,7 @@ class SingleTransit(object):
             bmask = np.logical_and(bmask, crf-1. < top * std)
             bmask[tmask] = np.logical_and(bmask[tmask], crf[tmask]-1. > - bottom * std)
 
+
         self.err[emask]    = (f/fit(t)*fit(t).mean())[mask].std()
         self.ivar[:]       = 1./self.err**2
         self.zeropoint     = fit(t).mean()

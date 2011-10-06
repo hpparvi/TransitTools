@@ -287,6 +287,7 @@ class MCMCResult(FitResult):
         Keyword arguments
         =================
           nbins
+          alpha
           fc
           xlim
           range
@@ -303,6 +304,7 @@ class MCMCResult(FitResult):
 
         nbins = kwargs.get('nbins', 50)
         fc    = kwargs.get('fc', '0.65')
+        alpha = kwargs.get('alpha', 1)
         xlim  = kwargs.get('xlim', None)
         rnge  = kwargs.get('range', None)
         xlabel = kwargs.get('xlabel', None)
@@ -337,7 +339,7 @@ class MCMCResult(FitResult):
             except ValueError:
                 xlabel = ''
 
-        n,b,p = ax.hist(d, nbins, range=rnge, fc=fc, histtype='stepfilled', normed=True, lw=1)
+        n,b,p = ax.hist(d, nbins, range=rnge, fc=fc, histtype='stepfilled', normed=True, lw=1, alpha=alpha)
 
         if kwargs.get('median', False):
             ax.axvline(np.median(d), c='0.25', lw=1.5)

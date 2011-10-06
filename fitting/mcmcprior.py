@@ -38,8 +38,9 @@ class JeffreysPrior(Prior):
     def random(self): raise NotImplementedError
 
 class GaussianPrior(Prior):
-    def __init__(self, mean, std):
-        super(GaussianPrior, self).__init__(mean-10*std, mean+10*std)
+    def __init__(self, mean, std, lims=None):
+        lims = lims or (mean-5*std, mean+5*std)
+        super(GaussianPrior, self).__init__(*lims)
         self.mean = float(mean)
         self.std = float(std)
         self._f1 = 1./ sqrt(2.*pi*std*std)
