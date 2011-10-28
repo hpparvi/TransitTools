@@ -43,7 +43,7 @@ class TestLightcurve(TransitLightcurve):
         self.eccentric = kwargs.get('eccentric', False)
 
         parm = TransitParameterization('physical', [k, tc, p, a, b])
-        super(TestLightcurve, self).__init__(parm, ldpar=ldpar, mode=mode, method=method, eccentric=self.eccentric, zeropoint=1., npol=npol)
+        super(TestLightcurve, self).__init__(parm, ldpar=ldpar, mode=mode, method=method, eccentric=self.eccentric, npol=npol)
         self.noise = noise
         self.resolution = resolution
         self.time_lim = time_lim
