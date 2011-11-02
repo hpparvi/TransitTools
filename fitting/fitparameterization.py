@@ -62,6 +62,8 @@ class MTFitParameterization(object):
         self.ntr  = ntr
         
         self.mode                 = kwargs.get('mode', 'om')
+        self.n_ldc                = kwargs.get('n_ldc', 1)
+        self.n_ld_groups          = kwargs.get('n_ld_groups', nch)
         self.ld_group_idx         = kwargs.get('ld_group_idx', range(nch))
 
         self.fit_radius_ratio     = kwargs.get('fit_radius_ratio',     True)
@@ -78,8 +80,6 @@ class MTFitParameterization(object):
         self.separate_k2_ch = kwargs.get('separate_k_per_channel',    False)
         self.separate_zp_tr = kwargs.get('separate_zp_per_transit',   False)
         self.separate_ld    = kwargs.get('separate_ld_per_channel',   False)
-
-        self.n_ldc = kwargs.get('n_ldc', 1)
 
         self.p_defs = []; self.p_indices = {}
 
@@ -105,7 +105,7 @@ class MTFitParameterization(object):
         info('Separate limb darkening per channel: %s' %self.separate_ld, I1)
         info('Fit TTVs: %s' %self.fit_ttv, I1)
 
-        self.n_lds = nch if self.separate_ld else 1
+        self.n_lds = self.n_ld_groups if self.separate_ld else 1
         self.n_k2  = nch if self.separate_k2_ch else 1
         self.n_zp  = nch if not self.separate_zp_tr else nch*ntr
 
@@ -155,14 +155,14 @@ class MTFitParameterization(object):
         ##
         if self.n_ldc == 1:
             if self.separate_ld:
-                for i in range(self.nch):
+                for i in range(self.n_ld_groups):
                     add_parameter(self.fit_limb_darkening, 'u %i'%i)
             else:
                 add_parameter(self.fit_limb_darkening, 'u 0')
 
         elif self.n_ldc == 2:
             if self.separate_ld:
-                for i in range(self.nch):
+                for i in range(self.n_ld_groups):
                     add_parameter(self.fit_limb_darkening, 'u %i + v %i'%(i,i))
                     add_parameter(self.fit_limb_darkening, 'u %i - v %i'%(i,i))
             else:
@@ -348,11 +348,11 @@ class MTFitParameterization(object):
         ## Fit limb darkening with constant impact parameter
         else:
             if self.n_ldc == 1:
-                ch_str = '+ch' if self.separate_ld else ''
+                ch_str = '+self.ld_group_idx[ch]' if self.separate_ld else ''
                 ps = self.parameter_string['u 0']
                 return "[{}[{}{}]]".format(ps[0], ps[1], ch_str)
             else:
-                ch_str = '+2*ch' if self.separate_ld else ''
+                ch_str = '+2*self.ld_group_idx[ch]' if self.separate_ld else ''
                 ps1 = self.parameter_string['u 0 + v 0']
                 ps2 = self.parameter_string['u 0 - v 0']
 
