@@ -35,7 +35,7 @@ class GibbsMCMC(MCMC):
             self.i_chain = chain
             P_cur = self.p.copy()
             prior_cur = asarray([p.prior(P_cur[i], P_cur) for i, p in enumerate(self.parameters)])
-            X_cur = self.chifun(P_cur)
+            L_cur = self.loglfun(P_cur)
 
             at_test = np.zeros(self.n_parms, dtype=np.int)
  
@@ -48,20 +48,16 @@ class GibbsMCMC(MCMC):
                     for i_p, p in enumerate(self.parameters):
                         P_try[i_p] = p.draw(P_cur[i_p])
                         prior_try[i_p] = p.prior(P_try[i_p], P_try)
-                        X_try =  self.chifun(P_try)
+                        L_try =  self.loglfun(P_try)
 
                         prior_ratio = prior_try.prod() / prior_cur.prod()
 
-                        err_t = self.fitpar.get_error_scale(P_try)
-                        err_c = self.fitpar.get_error_scale(P_cur)
-                        error_ratio = err_t / err_c
-
                         self.result.accepted[chain, i_p, 0] += 1
 
-                        if X_try < 1e17 and self.acceptStep(err_c*X_cur, err_t*X_try, prior_ratio, error_ratio):
+                        if self.acceptStep(L_cur, L_try, prior_ratio):
                             P_cur[i_p] = P_try[i_p]
                             prior_cur[i_p] = prior_try[i_p]
-                            X_cur = X_try
+                            L_cur = L_try
                             self.result.accepted[chain, i_p, 1] += 1
                             at_test[i_p] += 1
                         else:
@@ -79,7 +75,7 @@ class GibbsMCMC(MCMC):
                     i_at  += 1
 
                 self.result.steps[chain, i_s, :] = P_cur[:]
-                self.result.chi[chain, i_s] = X_cur
+                self.result.chi[chain, i_s] = L_cur
 
                 ## MONITORING
                 ## ==========

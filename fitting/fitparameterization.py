@@ -61,15 +61,17 @@ class MTFitParameterization(object):
         self.nch  = nch
         self.ntr  = ntr
         
-        self.mode                 = kwargs.get('mode', 'o')
-        
+        self.mode                 = kwargs.get('mode', 'om')
+        self.ld_group_idx         = kwargs.get('ld_group_idx', range(nch))
+
         self.fit_radius_ratio     = kwargs.get('fit_radius_ratio',     True)
         self.fit_transit_center   = kwargs.get('fit_transit_center',   True)
-        self.fit_period           = kwargs.get('fit_period',          False)
-        self.fit_transit_width    = kwargs.get('fit_transit_width',   False)
+        self.fit_period           = kwargs.get('fit_period',           True)
+        self.fit_transit_width    = kwargs.get('fit_transit_width',    True)
         self.fit_impact_parameter = kwargs.get('fit_impact_parameter', True)
         self.fit_limb_darkening   = kwargs.get('fit_limb_darkening',   True)
         self.fit_zeropoint        = kwargs.get('fit_zeropoint',        True)
+        self.fit_error            = kwargs.get('fit_error',            True)
         self.include_ttv          = kwargs.get('include_ttv',         False)
         self.fit_ttv              = kwargs.get('fit_ttv',             False)
 
@@ -185,8 +187,8 @@ class MTFitParameterization(object):
 
         ## --- Error scale ---
         ##
-        if 'error scale' in parameters.keys():
-            add_parameter(parameters['error scale']['free'], 'error scale', 'm')
+        for i in range(self.nch):
+            add_parameter(self.fit_error, 'error %i'%i) 
 
         self._generate()
 
@@ -225,7 +227,6 @@ class MTFitParameterization(object):
             self.parameter_view[name] = self.cp_vect[idx:idx+1]
             self.cp_index[name] = idx
             self.parameter_string[name] = 'self.cp_vect', idx
-
             
         ## Generate getters
         ## ================
@@ -235,8 +236,9 @@ class MTFitParameterization(object):
         self._generate_p_getter()
         self._generate_kipping_getter()
         self._generate_contamination_getter()
-        self._generate_error_scale_getter()
-        
+        #self._generate_error_scale_getter()
+        self._generate_error_getter()
+
         ## Generate mappings
         ## =================
         self.map_p_to_k = generate_mapping("physical","kipping")
@@ -308,7 +310,7 @@ class MTFitParameterization(object):
     def _generate_b2_getter(self):
         src  = "def get_b2(self, p, ch=0, tn=0):\n"
         src += "  return {}\n".format(self._generate_b2_str())
-
+        
         exec(src)
         self.get_b2_src = src
         self.get_b2 = MethodType(get_b2, self, MTFitParameterization)
@@ -454,6 +456,22 @@ class MTFitParameterization(object):
 
     ## Error scale
     ## ===========
+    def _generate_error_str(self):
+        ps = self.parameter_string['error 0']
+        if self.fit_error:
+            return "{}[{}+ch]".format(ps[0], ps[1])
+        else:
+            return self._generate_cp_str('error 0')
+        
+    def _generate_error_getter(self):
+        src  = "def get_error(self, p, ch=0):\n"
+        src += "  return {}\n".format(self._generate_error_str())
+
+        exec(src)
+        self.get_error_src = src
+        self.get_error = MethodType(get_error, self, MTFitParameterization)
+
+
     def _generate_error_scale_getter(self):
         src="def get_error_scale(self, p, ch=0):\n"
         if 'error scale' in self.p_names:

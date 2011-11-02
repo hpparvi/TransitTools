@@ -4,6 +4,7 @@ Implements the differential evolution optimization method by Storn & Price
 
 .. moduleauthor:: Hannu Parviainen <hannu@iac.es>
 """
+import sys
 import numpy as np
 from numpy import asarray, tile
 from numpy.random import seed, random, randint
@@ -74,7 +75,8 @@ class DiffEvol(object):
 
 
     def __call__(self):
-        """The differential evolution algorithm."""
+        """The differential evolution algorithm.
+           Note: here we maximize the function instead of minimizing."""
         r = self.result
         t = np.zeros(3, np.int)
         
@@ -106,7 +108,8 @@ class DiffEvol(object):
                 if ufit < r.fitness[i]:
                     r.pop[i,:] = u[:].copy()
                     r.fit[i]   = ufit
-                            
+                          
+            #sys.stdout.write('\rNode %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min())); sys.stdout.flush()
             logging.info('Node %i finished generation %4i/%4i  F = %7.5f'%(self.rank, j+1, self.n_gen, r.fit.min()))
         
         if self.use_mpi:
@@ -157,7 +160,7 @@ class ParallelDiffEvol(DiffEvol):
         migrate = False #np.zeros(1, dtype=np.short)
 
         for i in xrange(self.n_pop):
-            r.fit[i] = self.minfun(r.pop[i,:])
+            r.fit[i] = -self.minfun(r.pop[i,:])
             
         for j in xrange(self.n_gen):
             for i in xrange(self.n_pop):
@@ -179,7 +182,7 @@ class ParallelDiffEvol(DiffEvol):
                 ri = randint(self.n_parm)
                 u[ri] = v[ri].copy()
 
-                ufit = self.minfun(u)
+                ufit = -self.minfun(u)
     
                 if ufit < r.fitness[i]:
                     r.pop[i,:] = u[:].copy()
@@ -240,7 +243,7 @@ class MPIDiffEvolFull(DiffEvol):
 
         if self.rank == 0:
             for i in xrange(self.n_pop):
-                fitness[i] = self.minfun(r.pop[i,:])
+                fitness[i] = -self.minfun(r.pop[i,:])
             
         for j in xrange(self.n_gen):
             if self.rank == 0:
@@ -272,7 +275,7 @@ class MPIDiffEvolFull(DiffEvol):
             self.cm.Scatter(fitness, fitness_loc)
 
             for i in xrange(npop_loc):
-                ufit = self.minfun(pop_trial_loc[i,:])
+                ufit = -self.minfun(pop_trial_loc[i,:])
                 if ufit < fitness_loc[i]:
                     pop_curr_loc[i,:] = pop_trial_loc[i,:]
                     fitness_loc[i]    = ufit

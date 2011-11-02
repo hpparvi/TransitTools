@@ -150,7 +150,7 @@ def fit_multitransit(lcdata, parameterization, **kwargs):
     ##
     ## Global fitting using differential evolution
     ## -------------------------------------------
-    fitter_g = DiffEvol(minfun, array([p.p_min,p.p_max]).transpose(), **de_pars)
+    fitter_g = DiffEvol(minfun.minfun, array([p.p_min,p.p_max]).transpose(), **de_pars)
     #fitter_g = ParallelDiffEvol(minfun, array([p.p_min,p.p_max]).transpose(), **de_pars)
 
     r_de     = fitter_g()
@@ -164,7 +164,7 @@ def fit_multitransit(lcdata, parameterization, **kwargs):
     ## Local fitting using downhill simplex 
     ## ------------------------------------
     if do_local_fit:
-        r_fn    = fmin(minfun, f_de, full_output=1, **ds_pars)
+        r_fn    = fmin(minfun.minfun, f_de, full_output=1, **ds_pars)
         f_fn    = r_fn[0]
         chi_fn  = r_fn[1]
 
@@ -215,7 +215,10 @@ def fit_multitransit(lcdata, parameterization, **kwargs):
             info("%14.5f %14.5f  -  TTV amplitude [min]"%(p_ttv_de[0]*1440, p_ttv_fn[0]*1440), I1)
             info("%14.5f %14.5f  -  TTV period [d]"%(p_ttv_de[1], p_ttv_fn[1]), I1)
 
-
+        info("")
+        for chn in range(nc):
+            info("{:14.5f} {:14.5f}  -  Noise std".format(p.get_error(f_de, chn), p.get_error(f_fn, chn)), I1)
+            
         info('Best-fit fitting parameters',H2)
         for idx, pn in enumerate(p.fp_names):
             info('%10s %14.5f'%(pn, p.fp_vect[idx]))

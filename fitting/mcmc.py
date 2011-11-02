@@ -52,7 +52,7 @@ class MCMC(object):
     """
     Class encapsulating the mcmc run.
     """
-    def __init__(self, chifun, parameterization, **kwargs):
+    def __init__(self, loglfun, parameterization, **kwargs):
         
         self.seed     = kwargs.get('seed', 0)
         self.n_chains = kwargs.get('n_chains', 1)
@@ -89,12 +89,12 @@ class MCMC(object):
         if self.monitor:
             self.fig_progress = pl.figure(10, figsize=(34,20))
 
-        self.chifun = chifun
+        self.loglfun = loglfun
         self.parameters = parameterization.fp_defs
         self.fitpar = parameterization
         self.n_parms = self.fitpar.n_fp
 
-        self.n_points = concatenate(self.chifun.times).size
+        self.n_points = concatenate(self.loglfun.times).size
 
         self.p0 = self.fitpar.fp_vect.copy()
         self.p  = self.p0.copy()
@@ -104,8 +104,9 @@ class MCMC(object):
 
         self.result = MCMCResult(self.n_chains_l, self.n_steps, self.n_parms, self.p_names, self.p_descr)
 
-        acceptionTypes = {'ChiLikelihood':self._acceptStepChiLikelihood}
-        self.acceptStep = acceptionTypes['ChiLikelihood']
+        acceptionTypes = {'ChiLikelihood':self._acceptStepChiLikelihood, 'LogLikelihood':self._acceptStepLogLikelihood}
+#        self.acceptStep = acceptionTypes['ChiLikelihood']
+        self.acceptStep = acceptionTypes['LogLikelihood']
 
 
     def log_likelihood_Gaussian(self, chi_sqr, sigma, sigma_scale, n):
@@ -147,6 +148,37 @@ class MCMC(object):
         else:
             log_posterior = log(prior_ratio) + 0.5*( self.n_points*log(error_ratio) + X0 - Xt)
             if log_posterior > 0 or np.random.random() < exp(log_posterior):
+                return True
+            else:
+                return False
+
+
+    def _acceptStepLogLikelihood(self, logL0, logL1, prior_ratio):
+        """Decides whether we should accept the step or not based on the likelihood ratios.
+
+        Decides whether we should accept the step or not based on the ratio of the two given
+        likelihood values, ratio of priors and ratio of error scale parameters.
+
+        likelihood ratio = p1/p0 (b1/b0)^(n/2) exp(b0 ChiSqr0/2 - b1 ChiSqr1/2)        (1)
+
+                         = p1/p0 exp(n/2 log(b1/b0)) exp([b0 ChiSqr0 - b1 ChiSqr1]/2)  (2)
+
+                         = p1/p0 exp([n log(b1/b0) + b0 ChiSqr0 - b1 ChiSqr1]/2)       (3)
+
+        where p1 and p0 are the trial and current values of the prior, respectively, b1 and b0 the
+        error scale factors, n the number of data points, ChiSqr1 and ChiSqr0 the Chi^2 values. We
+        must make the transformation from (1) to (3) to increase numerical stability with large
+        datasets (such as CoRoT lightcurves). For example, raising any value to the 100000 power
+        directly would be a bit silly thing to do.
+        
+        Notes:
+          The likelihood ratios are supposed to be premultiplied by the error scale factor b.
+        """
+        if prior_ratio <= 0: # This should never ever happen! Find the bug!
+            return False
+        else:
+            posterior_ratio = prior_ratio * exp(logL1 - logL0)
+            if posterior_ratio > 1 or np.random.random() < posterior_ratio:
                 return True
             else:
                 return False
