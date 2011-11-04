@@ -67,6 +67,7 @@ class MTFitResult(FitResult):
         self.parameterization.get_p = None
         self.parameterization.get_contamination = None
         self.parameterization.get_error_scale = None
+        self.parameterization.get_error = None
         self.parameterization.get_kipping = None
         self.parameterization.map_p_to_k = None
         self.parameterization.map_k_to_p = None
