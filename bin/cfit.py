@@ -16,6 +16,7 @@ import cPickle
 import numpy as np
 from time import time
 from optparse import OptionParser
+from os.path import join, exists
 
 ##########################################################################################
 ##
@@ -25,6 +26,7 @@ op = OptionParser()
 op.add_option('-f', '--config-file', dest='config_file', type='str', default=None)
 op.add_option('', '--no-initial-fit', dest='do_initial_fit', action='store_false', default=True)
 op.add_option('', '--no-final-fit', dest='do_final_fit', action='store_false', default=True)
+op.add_option('', '--do-global-fit', dest='do_global_fit', action='store_true', default=False)
 op.add_option('', '--no-mcmc', dest='do_mcmc', action='store_false', default=True)
 op.add_option('', '--load-lcdata', dest='load_lcdata', action='store_true', default=False)
 op.add_option('', '--save-lcdata', dest='save_lcdata', action='store_true', default=False)
@@ -70,16 +72,20 @@ def main():
     ## INITIALIZATION
     ## ==============
     ##
-    method = cp.get('General','method')
-    maxpts = cp.getint('Target','max_pts') or None
+    ## General Options
+    ## ---------------
+    basename = cp.get('General','basename')
+    method   = cp.get('General','method')
+    targetid = CoRoT_targets[int(cp.get('General','name')[1:])]
 
-    fn_initial = cp.get('Initial DE','file')
-    fn_final   = cp.get('Final DE','file')
-    fn_mcmc    = cp.get('MCMC','file')
-    fn_data    = cp.get('Reduction','file')
+    maxpts   = cp.getint('Target','max_pts') or None
 
-    ct = CoRoT_targets[int(cp.get('General','name')[1:])]
-    channels = ['w'] if ct in  [CoRoT_targets[10]] else ['r','g','b']
+    fn_data    = '{}_00_lc.pkl'.format(basename)
+    fn_initial = '{}_01_if.pkl'.format(basename)
+    fn_final   = '{}_02_ff.pkl'.format(basename)
+    fn_mcmc    = '{}_03_mc.pkl'.format(basename)
+
+    do_global_fit = not exists(fn_initial) or opt.do_global_fit
 
     de_init_pars = {'npop':cp.getint('Initial DE','npop'),
                     'ngen':cp.getint('Initial DE','ngen'),
@@ -114,44 +120,19 @@ def main():
     np.random.seed(0)
     INF = 1e8
 
-
-    ##########################################################################################
-    ##
-    ## READ IN THE PARAMETERS
-    ## ======================
-    parameter_defs = {}
-    for p in cp.items('MCMC Parameters'):
-        parameter_defs[p[0]] = eval(p[1])
-
-    clean_pars = {'top':3, 'bottom':10}
-    w_period   = cp.getfloat('General','w_period')
-    w_transit  = cp.getfloat('General','w_transit')
-    phase_lim  = cp.getfloat('General','phase_lim')
-
-    mcmc_pars = {'n_steps':cp.getint('MCMC','nsteps'),
-                 'n_chains':cp.getint('MCMC','nchains'),
-                 'seed':cp.getint('MCMC','seed'),
-                 'thinning':cp.getint('MCMC','thinning'),
-                 'autotune_length':cp.getint('MCMC','autotune_length'),
-                 'autotune_interval':cp.getint('MCMC','autotune_interval'),
-                 'monitor_interval':cp.getint('MCMC','monitor_interval'),
-                 'autosave_interval':cp.getint('MCMC','autosave_interval'),
-                 'autosave_filename':cp.get('MCMC','autosave_filename'),
-                 'use_curses':opt.use_curses}
-
     ##########################################################################################
     ##
     ## DEFINE HELPER FUNCTIONS
     ## =======================
     ##
-    def load_corot_data(ct):
-        return import_as_MTLC(ct, w_period, w_transit, maxpts=maxpts,
+    def load_corot_data(targetid):
+        return import_as_MTLC(targetid, w_period, w_transit, maxpts=maxpts,
                               clean_pars=clean_pars,
                               ps_period=CoRoT.orbit_period,
                               combine_channels=combine_channels)
 
 
-    def fit_corot(ct, data, parameterization, de_pars):
+    def fit_corot(targetid, data, parameterization, de_pars):
         return fit_multitransit(data, parameterization,
                                 de_pars=de_pars,
                                 ds_pars=ds_pars,
@@ -163,8 +144,13 @@ def main():
     ## LOAD DATA
     ## =========
     ##
+    clean_pars = {'top':3, 'bottom':10}
+    w_period   = cp.getfloat('General','w_period')
+    w_transit  = cp.getfloat('General','w_transit')
+    phase_lim  = cp.getfloat('General','phase_lim')
+
     if not opt.load_lcdata:
-        data = load_corot_data(ct) if is_root else None
+        data = load_corot_data(targetid) if is_root else None
         if opt.save_lcdata and is_root:
             f = open(fn_data, 'w')
             cPickle.dump(data, f)
@@ -178,28 +164,52 @@ def main():
         data = mpi_comm.bcast(data)
        
 
-    # P = 0.853585; tc = 2454398.0767
-    # p  = fold(data[0].get_time(), P, origo=tc, shift=0.5)-0.5
+    ##########################################################################################
+    ##
+    ## DEFINE PARAMETERS
+    ## =================
+    parameter_defs = {}
+    for p in cp.items('MCMC Parameters'):
+        parameter_defs[p[0]] = eval(p[1])
 
-    # pbt, fbt, ebt = bin(p,data[0].get_flux(),100)
-    # pl.plot(pbt, fbt, '.')
-    # pl.show()
-    # exit()
- 
+    def addpar(name, pdef):
+        if name not in parameter_defs.keys():
+            parameter_defs[name] = pdef
+
+    for ch in range(len(data)):
+        if 'error {}'.format(ch) not in parameter_defs.keys():
+            std = data[ch].get_std().mean() 
+            parameter_defs['error {}'.format(ch)] = {"sigma":1e-4, 'free':True, 'value':std, 'use':'om', "prior":UniformPrior(1e-1*std, 1e1*std), 'description':'Error {}'.format(ch), 'units':'-'}
+            
+        addpar('zp {}'.format(ch), {"sigma":1e-4, 'free':True, 'value':1., 'use':'om', "prior":UniformPrior(0.995, 1.005), 'description':'Zeropoint', 'units':'-'})
+
+    addpar('b',  {"sigma":1e-2, 'free':True, 'value':0.5, 'use':'om', "prior":UniformPrior(0.0, 1.0), 'description':'Impact parameter', 'units':'-'})
+    addpar('tc', {"sigma":1e-4, 'free':True, 'value':targetid.tc, 'use':'om', "prior":UniformPrior(targetid.tc-2e-1, targetid.tc+2e-1), 'description':'Transit center', 'units':'d'})
+    addpar('p',  {"sigma":1e-4, 'free':True, 'value':targetid.p, 'use':'om', "prior":UniformPrior(targetid.p-1e-1, targetid.p+1e-1), 'description':'Period', 'units':'d'})
+
+    mcmc_pars = {'n_steps':cp.getint('MCMC','nsteps'),
+                 'n_chains':cp.getint('MCMC','nchains'),
+                 'seed':cp.getint('MCMC','seed'),
+                 'thinning':cp.getint('MCMC','thinning'),
+                 'autotune_length':cp.getint('MCMC','autotune_length'),
+                 'autotune_interval':cp.getint('MCMC','autotune_interval'),
+                 'monitor_interval':cp.getint('MCMC','monitor_interval'),
+                 'autosave_interval':cp.getint('MCMC','autosave_interval'),
+                 'autosave_filename':cp.get('MCMC','autosave_filename'),
+                 'use_curses':opt.use_curses}
+
+
     ##########################################################################################
     ##
     ## MINIMIZATION
     ## ============
     ##
-    parameterization = MTFitParameterization(parameter_defs,
-                                             len(data),
-                                             data[0].n_transits,
-                                             mode='o',
-                                             **fit_pars)
+    parameterization = MTFitParameterization(parameter_defs, len(data), data[0].n_transits,
+                                             mode='o', **fit_pars)
     ## Initial fit
     ## ===========
-    if do_initial_fit:
-        mres = fit_corot(ct, data, parameterization, de_init_pars)
+    if do_global_fit:
+        mres = fit_corot(targetid, data, parameterization, de_init_pars)
         if is_root:  mres.save(fn_initial)
         if with_mpi: mres = mpi_comm.bcast(mres)
     else:
@@ -208,37 +218,25 @@ def main():
     ## Clean the data using the initial fit
     ## ====================================
     if is_root:
-        if opt.plot_transits: plot_transits(500, data, ct, '%s_initial_transits.pdf'%ct.basename)
-        tp = TransitParameterization('physical', mres.ephemeris)
-        for i, d in enumerate(data):
-            lc = TransitLightcurve(tp, ldpar=mres.ldc[i], method='fortran', mode='time')
-            d.clean_with_lc(lc, top=5., bottom=12.)
-        if opt.plot_transits: plot_transits(600, data, ct, '%s_cleaned_transits.pdf'%ct.basename, lc)
+        if opt.plot_transits: plot_transits(500, data, targetid, '%s_initial_transits.pdf'%targetid.basename)
+        #tp = TransitParameterization('physical', mres.ephemeris)
+        #for i, d in enumerate(data):
+        #    lc = TransitLightcurve(tp, ldpar=mres.ldc[i], method='fortran', mode='time')
+        #    d.clean_with_lc(lc, top=5., bottom=12.)
+        #if opt.plot_transits: plot_transits(600, data, targetid, '%s_cleaned_transits.pdf'%targetid.basename, lc)
 
-    if with_mpi:
-        data = mpi_comm.bcast(data)
+    #if with_mpi:
+    #    data = mpi_comm.bcast(data)
 
     ## Final fit
     ## ==========
-    if do_final_fit:
-        mres = fit_corot(ct, data, parameterization, de_final_pars)
-        if is_root: mres.save(fn_final)
-        if with_mpi: mres = mpi_comm.bcast(mres)
-    else:
-        mres = load_MTFitResult(fn_final)
+    #if do_final_fit:
+    #    mres = fit_corot(targetid, data, parameterization, de_final_pars)
+    #    if is_root: mres.save(fn_final)
+    #    if with_mpi: mres = mpi_comm.bcast(mres)
+    #else:
+    #    mres = load_MTFitResult(fn_final)
 
-    # P = mres.e[2]; tc = mres.e[1]
-    # p  = fold(data[0].get_time(), P, origo=tc, shift=0.5)-0.5
-
-    # tp = TransitParameterization('physical', mres.ephemeris)
-    # lc = TransitLightcurve(tp, ldpar=mres.ldc[i], method=method, mode='phase')
-    # p2 = np.linspace(p.min(),p.max(), 2000)
-
-    # pbt, fbt, ebt = bin(p,data[0].get_flux(),100)
-    # pl.plot(pbt, fbt, '.')
-    # pl.plot(p2, lc(2*np.pi*p2))
-    # pl.show()
-    # exit()
 
     ##########################################################################################
     ##
@@ -288,7 +286,7 @@ def main():
     ## WRITE REPORT
     ## ============
     ##
-    pp = PdfPages('%s_initial.pdf'%ct.basename)
+    pp = PdfPages('%s_initial.pdf'%targetid.basename)
 
     figi = 10
     slices = [t.get_transit_slices()     for t in data]
@@ -358,7 +356,7 @@ def main():
 
     pp.close()
 
-def plot_transits(figi, data, ct, filename, lc_solution=None):
+def plot_transits(figi, data, targetid, filename, lc_solution=None):
     pp = PdfPages(filename)
     for i, d in enumerate(data):
         nt = d.n_transits
