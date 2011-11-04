@@ -177,8 +177,8 @@ class MCMC(object):
         if prior_ratio <= 0: # This should never ever happen! Find the bug!
             return False
         else:
-            posterior_ratio = prior_ratio * exp(logL1 - logL0)
-            if posterior_ratio > 1 or np.random.random() < posterior_ratio:
+            log_posterior_ratio = log(prior_ratio) + logL1 - logL0
+            if log_posterior_ratio > 0 or np.random.random() < exp(log_posterior_ratio):
                 return True
             else:
                 return False
