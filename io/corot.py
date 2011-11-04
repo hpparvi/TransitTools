@@ -4,6 +4,7 @@ import os.path
 import numpy as np
 import scipy.constants as c
 import pyfits as pf
+from itertools import product
 
 from transitLightCurve.core import *
 from transitLightCurve.lightcurvedata import MultiTransitLC
@@ -46,6 +47,9 @@ def import_as_MTLC(ctarget, width=0.2, twidth=None, maxpts=None, **kwargs):
     hdu_d = pf.open(ctarget.file)
     dat_d = hdu_d[1].data
 
+    twidth = twidth or ctarget.transit_width
+    maxpts = maxpts or -1 
+
     combine_channels = kwargs.get('combine_channels', False)
 
     stat = dat_d.field('STATUS')
@@ -58,36 +62,50 @@ def import_as_MTLC(ctarget, width=0.2, twidth=None, maxpts=None, **kwargs):
     flux = []; fdev = []
     if not ctarget.colors:
         chs = ['w']
-        flux.append(dat_d.field('whiteflux')[mask].copy().astype(np.float64))
-        fdev.append(dat_d.field('whitefluxdev')[mask].copy().astype(np.float64))
+        flux.append(dat_d.field('whiteflux')[mask][:maxpts].copy().astype(np.float64))
+        fdev.append(dat_d.field('whitefluxdev')[mask][:maxpts].copy().astype(np.float64))
     else:
         if not combine_channels:
             chs = ['r','g','b']
             for ch in chs:
-                flux.append(dat_d.field( channel_fits_names[ch]+'flux')[mask].copy().astype(np.float64))
-                fdev.append(dat_d.field( channel_fits_names[ch]+'fluxdev')[mask].copy().astype(np.float64))
+                flux.append(dat_d.field( channel_fits_names[ch]+'flux')[mask][:maxpts].copy().astype(np.float64))
+                fdev.append(dat_d.field( channel_fits_names[ch]+'fluxdev')[mask][:maxpts].copy().astype(np.float64))
         else:
             chs = ['w']
-            flux.append(dat_d.field('redflux')[mask].copy().astype(np.float64)+
-                        dat_d.field('greenflux')[mask].copy().astype(np.float64)+
-                        dat_d.field('blueflux')[mask].copy().astype(np.float64))
+            flux.append(dat_d.field('redflux')[mask][:maxpts].copy().astype(np.float64)+
+                        dat_d.field('greenflux')[mask][:maxpts].copy().astype(np.float64)+
+                        dat_d.field('blueflux')[mask][:maxpts].copy().astype(np.float64))
 
-            fdev.append(np.sqrt(dat_d.field('redfluxdev')[mask].copy().astype(np.float64)**2+
-                        dat_d.field('greenfluxdev')[mask].copy().astype(np.float64)**2+
-                        dat_d.field('bluefluxdev')[mask].copy().astype(np.float64)**2))
+            fdev.append(np.sqrt(dat_d.field('redfluxdev')[mask][:maxpts].copy().astype(np.float64)**2+
+                        dat_d.field('greenfluxdev')[mask][:maxpts].copy().astype(np.float64)**2+
+                        dat_d.field('bluefluxdev')[mask][:maxpts].copy().astype(np.float64)**2))
                 
-
     expmask = fdev[-1] < 1e-7
     date[expmask]  -= 16./(60.*60.*24.)
     date[~expmask] += 234./(60.*60.*24.)
 
-    twidth = twidth or ctarget.transit_width
-    maxpts = maxpts or -1 
-    
+    date = date[:maxpts]
+
+    ## Split the ligthcurves by the exposure time
+    ## 
+    sid = (fdev[0] > 1e-6).sum()
+    if sid > 0:
+        ft, et, dt, ct = [], [], [], []
+        for fl,fd, ch in zip(flux, fdev, chs):
+            ft.append(fl[:sid]); ft.append(fl[:sid])
+            et.append(fd[:sid]); et.append(fd[:sid])
+            dt.append(date[:sid]); dt.append(date[:sid])
+            ct.append('{} {}'.format(channel_fits_names[ch], '512'))
+            ct.append('{} {}'.format(channel_fits_names[ch], '32'))
+
+        flux = ft; fdev = et; date=dt; chnames = ct    
+    else:
+        chnames = [channel_fits_names[ch] for ch in chs]
+
+
     mtlc = []
-    for i, ch in zip(range(len(flux)), chs):
-        mtlc.append(MultiTransitLC(channel_fits_names[ch], date[:maxpts]+time_origin,
-                                   flux[i][:maxpts], fdev[i][:maxpts],
+    for i, ch in zip(range(len(flux)), chnames):
+        mtlc.append(MultiTransitLC(chnames, date[i]+time_origin, flux[i], fdev[i],
                                    ctarget.transit_center, ctarget.planet_period,
                                    width, twidth, channel=ch, **kwargs))
         
