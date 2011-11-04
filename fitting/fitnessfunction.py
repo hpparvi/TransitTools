@@ -145,7 +145,11 @@ class FitnessFunction(object):
                       return -logL
                       % endif
                   else:
+                      % if not negate:
+                      return -1e18
+                      % else:
                       return 1e18
+                      % endif
                """ 
 
         src = dedent(Template(src_template).render(fname=fname,channels=channels, p='p', ecc_str=ecc_str, negate=negate))
